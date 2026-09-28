@@ -14,7 +14,7 @@ import type {
 } from "@/lib/types";
 import { isBlockingExtensionUiRequest } from "@/lib/browser-notifications";
 import { normalizeToolCalls } from "@/lib/normalize";
-import { isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
+import { isPromptRejectedError, registerSessionCwd, sendAgentCommand } from "@/lib/agent-client";
 import {
   deleteSessionViewSnapshot,
   getSessionViewSnapshot,
@@ -402,6 +402,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const historyCursorRef = useRef<string | null>(null);
   const hasEarlierMessagesRef = useRef(false);
 
+  const effectiveCwd = session?.cwd || newSessionCwd || undefined;
+  const effectiveCwdRef = useRef<string | undefined>(effectiveCwd);
+  effectiveCwdRef.current = effectiveCwd;
+
+  useEffect(() => {
+    if (session?.id) {
+      registerSessionCwd(session.id, effectiveCwd);
+    }
+  }, [session?.id, effectiveCwd]);
+
   sessionPropIdRef.current = session?.id ?? null;
   dataRef.current = data;
   messagesRef.current = messages;
@@ -412,7 +422,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   if (!eventConnectionRef.current) {
     eventConnectionRef.current = new AgentEventConnection({
-      createSource: (sid) => new EventSource(`/api/agent/${encodeURIComponent(sid)}/events`),
+      createSource: (sid) => {
+        const cwd = effectiveCwdRef.current;
+        const url = cwd
+          ? `/api/agent/${encodeURIComponent(sid)}/events?cwd=${encodeURIComponent(cwd)}`
+          : `/api/agent/${encodeURIComponent(sid)}/events`;
+        return new EventSource(url);
+      },
       onEvent: (event) => handleAgentEventRef.current?.(event as AgentEvent),
       shouldMaintain: (sid) => (
         sessionHookMountedRef.current
@@ -539,6 +555,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     try {
       if (showLoading) setLoading(true);
       const effectiveCwd = (session?.cwd || newSessionCwd) || undefined;
+      if (sid && effectiveCwd) registerSessionCwd(sid, effectiveCwd);
       const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1", tree: "summary" });
       if (options?.force) params.set("force", "1");
       if (effectiveCwd) params.set("cwd", effectiveCwd);
@@ -558,6 +575,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json() as SessionData;
+      if (d.sessionId && effectiveCwd) registerSessionCwd(d.sessionId, effectiveCwd);
       if (sessionIdRef.current !== sid) return null;
       // Freshness check: when the disk snapshot is unchanged (same opaque
       // revision), keep any history the user already paged in instead of
@@ -644,7 +662,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (!includeState) return null;
 
       try {
-        const stateRes = await fetch(`/api/sessions/${encodeURIComponent(sid)}/state`);
+        const stateUrl = effectiveCwd
+          ? `/api/sessions/${encodeURIComponent(sid)}/state?cwd=${encodeURIComponent(effectiveCwd)}`
+          : `/api/sessions/${encodeURIComponent(sid)}/state`;
+        const stateRes = await fetch(stateUrl);
         if (!stateRes.ok) throw new Error(`HTTP ${stateRes.status}`);
         const agentState = await stateRes.json() as { running: boolean; state?: AgentStateResponse };
         if (sessionIdRef.current !== sid) return null;
@@ -797,6 +818,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       };
       const realId = result.sessionId;
       sessionIdRef.current = realId;
+      if (realId && (newSessionCwd || effectiveCwd)) {
+        registerSessionCwd(realId, newSessionCwd || effectiveCwd);
+      }
       if (result.model && newSessionModelOverrideRef.current === selectedModel) {
         setPendingModel(result.model);
         if (!selectedModel) setNewSessionDefaultModel(result.model);
@@ -1069,7 +1093,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       ) return;
 
       try {
-        const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
+        const res = await (effectiveCwdRef.current
+          ? fetch(`/api/agent/${encodeURIComponent(sid)}?cwd=${encodeURIComponent(effectiveCwdRef.current)}`)
+          : fetch(`/api/agent/${encodeURIComponent(sid)}`));
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json() as { running?: boolean; state?: AgentStateResponse };
         if (
@@ -1145,7 +1171,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     while (agentRunningRef.current && Date.now() - startedAt < PROMPT_SETTLE_MAX_MS) {
       if (runId !== undefined && promptRunIdRef.current !== runId) return;
       try {
-        const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
+        const agentUrl = effectiveCwdRef.current
+          ? `/api/agent/${encodeURIComponent(sid)}?cwd=${encodeURIComponent(effectiveCwdRef.current)}`
+          : `/api/agent/${encodeURIComponent(sid)}`;
+        const res = await fetch(agentUrl);
         if (res.ok) {
           const data = await res.json() as { running?: boolean; state?: AgentStateResponse };
           const state = data.state;
@@ -1173,7 +1202,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     ) {
       await delay(BASH_STATE_RECONCILE_MS);
       try {
-        const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
+        const agentUrl = effectiveCwdRef.current
+          ? `/api/agent/${encodeURIComponent(sid)}?cwd=${encodeURIComponent(effectiveCwdRef.current)}`
+          : `/api/agent/${encodeURIComponent(sid)}`;
+        const res = await fetch(agentUrl);
         if (!res.ok) continue;
         const data = await res.json() as { state?: AgentStateResponse };
         syncLiveModel(data.state);
@@ -1200,7 +1232,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (!agentRunningRef.current || sessionIdRef.current !== sid) return;
     const runId = promptRunIdRef.current;
     try {
-      const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
+      const agentUrl = effectiveCwdRef.current
+        ? `/api/agent/${encodeURIComponent(sid)}?cwd=${encodeURIComponent(effectiveCwdRef.current)}`
+        : `/api/agent/${encodeURIComponent(sid)}`;
+      const res = await fetch(agentUrl);
       if (!res.ok) return;
       const data = await res.json() as { running?: boolean; state?: AgentStateResponse };
       // A slow response can straddle a run boundary (previous run finished
@@ -1294,7 +1329,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         dispatch({ type: "end" });
         if (sessionIdRef.current) {
           loadSession(sessionIdRef.current);
-          fetch(`/api/agent/${encodeURIComponent(sessionIdRef.current)}`)
+          const agentUrl = effectiveCwdRef.current
+            ? `/api/agent/${encodeURIComponent(sessionIdRef.current)}?cwd=${encodeURIComponent(effectiveCwdRef.current)}`
+            : `/api/agent/${encodeURIComponent(sessionIdRef.current)}`;
+          fetch(agentUrl)
             .then((r) => r.json())
             .then((d: { state?: AgentStateResponse }) => {
               syncLiveModel(d.state);

@@ -26,7 +26,7 @@ export async function POST(
     const toolNames = requestedToolNames as string[] | undefined;
 
     // Fast path: already-running in-process session
-    const existing = getRpcSession(id);
+    const existing = getRpcSession(id, cwd);
     if (body.type === "set_tools") {
       const filePath = existing?.sessionFile || await resolveSessionPath(id, cwd) || undefined;
       if (!existing?.isAlive() && !filePath) {
@@ -55,12 +55,12 @@ export async function POST(
     }
 
     // Check if this session is an active lab worker session
-    if (body.type === "prompt") {
-      const header = readSessionHeader(filePath);
-      const labCheck = isLabSession(id, header?.cwd);
-      if (labCheck.isLab && labCheck.labPath && labCheck.role) {
-        const { alive } = isDaemonAlive(labCheck.labPath);
-        if (alive) {
+    const header = readSessionHeader(filePath);
+    const labCheck = isLabSession(id, header?.cwd || cwd);
+    if (labCheck.isLab && labCheck.labPath && labCheck.role) {
+      const { alive } = isDaemonAlive(labCheck.labPath);
+      if (alive) {
+        if (body.type === "prompt") {
           const message = typeof body.message === "string" ? body.message : "";
           if (body.delivery === "inbox") {
             const res = await sendLabInbox(labCheck.labPath, labCheck.role, message, (body.from as string) || "human");
@@ -73,6 +73,12 @@ export async function POST(
             if (!res.ok) throw new Error(res.error || "Failed to steer worker");
             promptAccepted = true;
             return NextResponse.json({ success: true, data: { status: "steered", role: labCheck.role, result: res.result } });
+          }
+        } else if (body.type === "compact") {
+          const ipcRes = await sendLabdIpc(labCheck.labPath, { cmd: "status" }, 1500);
+          const worker = ipcRes?.workers?.[labCheck.role];
+          if (worker?.busy) {
+            return NextResponse.json({ error: `Cannot compact context while worker ${labCheck.role} is busy` }, { status: 409 });
           }
         }
       }
@@ -97,23 +103,24 @@ export async function POST(
 
 // GET /api/agent/[id] - Get current agent state
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const cwd = new URL(req.url).searchParams.get("cwd") || undefined;
 
   try {
-    const session = getRpcSession(id);
+    const session = getRpcSession(id, cwd);
     if (session && session.isAlive()) {
       const state = await session.send({ type: "get_state" });
       return NextResponse.json({ running: true, state });
     }
 
     // Check if this is an active lab worker managed externally
-    const filePath = await resolveSessionPath(id);
+    const filePath = await resolveSessionPath(id, cwd);
     if (filePath) {
       const header = readSessionHeader(filePath);
-      const labCheck = isLabSession(id, header?.cwd);
+      const labCheck = isLabSession(id, header?.cwd || cwd);
       if (labCheck.isLab && labCheck.labPath && labCheck.role) {
         const { alive } = isDaemonAlive(labCheck.labPath);
         if (alive) {

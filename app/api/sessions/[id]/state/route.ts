@@ -3,10 +3,11 @@ import { getRpcSession } from "@/lib/rpc-manager";
 import { resolveSessionPath } from "@/lib/session-reader";
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const cwd = new URL(req.url).searchParams.get("cwd") || undefined;
   try {
     const rpc = getRpcSession(id);
     if (rpc?.isAlive()) {
@@ -14,7 +15,8 @@ export async function GET(
       return NextResponse.json({ running: true, state });
     }
 
-    if (!await resolveSessionPath(id)) {
+    const resolved = cwd ? await resolveSessionPath(id, cwd) : await resolveSessionPath(id);
+    if (!resolved) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
     return NextResponse.json({ running: false });

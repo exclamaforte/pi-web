@@ -11,19 +11,20 @@ export async function GET(
 ) {
   const { id } = await params;
   if (req.signal.aborted) return new Response(null, { status: 204 });
+  const cwd = new URL(req.url).searchParams.get("cwd") || undefined;
 
   // Fast path: already-running session
-  const session = getRpcSession(id);
+  const session = getRpcSession(id, cwd);
   let sessionPromise;
   if (session?.isAlive()) {
     sessionPromise = Promise.resolve(session);
   } else {
-    const filePath = await resolveSessionPath(id);
+    const filePath = await resolveSessionPath(id, cwd);
     if (!filePath) {
       return new Response("Session not found", { status: 404 });
     }
     if (req.signal.aborted) return new Response(null, { status: 204 });
-    sessionPromise = startRpcSession(id, filePath, undefined).then((result) => result.session);
+    sessionPromise = startRpcSession(id, filePath, cwd).then((result) => result.session);
   }
 
   const stream = createAgentEventStream(req, id, sessionPromise);

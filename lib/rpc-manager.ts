@@ -1745,8 +1745,17 @@ function trackStartingSession(cwd: string): () => void {
   };
 }
 
-export function getRpcSession(sessionId: string): AgentSessionWrapper | undefined {
-  return getRegistry().get(sessionId);
+export function getRpcSession(sessionId: string, cwd?: string): AgentSessionWrapper | undefined {
+  const session = getRegistry().get(sessionId);
+  if (!session) return undefined;
+  if (cwd && session.cwd) {
+    try {
+      if (resolve(session.cwd) !== resolve(cwd)) return undefined;
+    } catch {
+      if (session.cwd !== cwd) return undefined;
+    }
+  }
+  return session;
 }
 
 export interface SetRpcSessionToolsResult {
@@ -1961,7 +1970,11 @@ export async function startRpcSession(
   const locks = getLocks();
 
   const existing = registry.get(sessionId);
-  if (existing?.isAlive()) return { session: existing, realSessionId: sessionId };
+  if (existing?.isAlive()) {
+    const isSameFile = !sessionFile || !existing.sessionFile || resolve(existing.sessionFile) === resolve(sessionFile);
+    if (isSameFile) return { session: existing, realSessionId: sessionId };
+    await existing.shutdown();
+  }
 
   const inflight = locks.get(sessionId);
   if (inflight) return inflight;

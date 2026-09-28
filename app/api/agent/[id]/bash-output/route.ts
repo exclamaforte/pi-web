@@ -19,10 +19,12 @@ export async function GET(
   const { id } = await params;
   let path: string | null = null;
   let download = false;
+  let cwd: string | undefined;
   try {
     const url = new URL(_req.url);
     path = url.searchParams.get("path");
     download = url.searchParams.get("download") === "1";
+    cwd = url.searchParams.get("cwd") || undefined;
   } catch {
     return NextResponse.json({ error: "invalid url" }, { status: 400 });
   }
@@ -36,7 +38,7 @@ export async function GET(
     return NextResponse.json({ error: "invalid path" }, { status: 400 });
   }
 
-  if (!await isBashOutputPathReferencedBySession(resolved, id)) {
+  if (!await isBashOutputPathReferencedBySession(resolved, id, cwd)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 

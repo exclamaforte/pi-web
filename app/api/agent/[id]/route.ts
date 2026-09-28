@@ -13,8 +13,9 @@ export async function POST(
   let promptAccepted = false;
 
   try {
-    const body = await req.json() as { type: string; [key: string]: unknown };
+    const body = await req.json() as { type: string; cwd?: string; [key: string]: unknown };
     commandType = typeof body.type === "string" ? body.type : undefined;
+    const cwd = new URL(req.url).searchParams.get("cwd") || (typeof body.cwd === "string" ? body.cwd : undefined);
     const requestedToolNames = body.toolNames;
     if (
       requestedToolNames !== undefined
@@ -27,7 +28,7 @@ export async function POST(
     // Fast path: already-running in-process session
     const existing = getRpcSession(id);
     if (body.type === "set_tools") {
-      const filePath = existing?.sessionFile || await resolveSessionPath(id) || undefined;
+      const filePath = existing?.sessionFile || await resolveSessionPath(id, cwd) || undefined;
       if (!existing?.isAlive() && !filePath) {
         return NextResponse.json({ error: "Session not found" }, { status: 404 });
       }
@@ -43,7 +44,7 @@ export async function POST(
       return NextResponse.json({ success: true, data: result });
     }
 
-    const filePath = await resolveSessionPath(id);
+    const filePath = await resolveSessionPath(id, cwd);
     if (!filePath) {
       return NextResponse.json({
         error: "Session not found",

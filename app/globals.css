@@ -1938,3 +1938,42 @@ span.token.table {
     font-size: max(16px, var(--chat-content-font-size, 14px)) !important;
   }
 }
+
+/* iOS standalone: env() can report 0, so keep a device-sized fallback on the
+   status-bar edge so the top bar is never obscured by the clock and battery. */
+@supports (-webkit-touch-callout: none) {
+  @media (display-mode: standalone) {
+    .app-top-bar {
+      padding-top: max(54px, env(safe-area-inset-top)) !important;
+      height: calc(36px + max(54px, env(safe-area-inset-top))) !important;
+    }
+    .lab-panel-header {
+      padding-top: max(54px, env(safe-area-inset-top)) !important;
+    }
+    .sidebar-container {
+      padding-top: max(54px, env(safe-area-inset-top)) !important;
+    }
+    .right-panel-tab-bar {
+      padding-top: max(54px, env(safe-area-inset-top)) !important;
+      height: calc(36px + max(54px, env(safe-area-inset-top))) !important;
+    }
+  }
+
+  @media (display-mode: standalone) and (orientation: landscape) {
+    .app-top-bar {
+      padding-top: env(safe-area-inset-top) !important;
+      height: calc(36px + env(safe-area-inset-top)) !important;
+    }
+    .lab-panel-header {
+      padding-top: max(10px, env(safe-area-inset-top)) !important;
+    }
+    .sidebar-container {
+      padding-top: env(safe-area-inset-top) !important;
+    }
+    .right-panel-tab-bar {
+      padding-top: env(safe-area-inset-top) !important;
+      height: calc(36px + env(safe-area-inset-top)) !important;
+    }
+  }
+}
+

@@ -9,6 +9,7 @@ const appShellSource = await readFile(new URL("./AppShell.tsx", import.meta.url)
 const chatWindowSource = await readFile(new URL("./ChatWindow.tsx", import.meta.url), "utf8");
 const chatInputSource = await readFile(new URL("./ChatInput.tsx", import.meta.url), "utf8");
 const viewportHookSource = await readFile(new URL("../hooks/useViewportHeight.ts", import.meta.url), "utf8");
+const labPanelSource = await readFile(new URL("./lab/LabPanel.tsx", import.meta.url), "utf8");
 
 test("configures iOS standalone mode to use the full screen", () => {
   assert.match(layoutSource, /statusBarStyle: "black-translucent"/);
@@ -56,3 +57,12 @@ test("keeps modal dialogs clear of the iOS status bar in standalone mode", () =>
   assert.match(settingsCssSource, /@media \(display-mode: standalone\) and \(orientation: landscape\) \{[\s\S]*?padding-top: max\(8px, env\(safe-area-inset-top\)\);[\s\S]*?padding-right: max\(59px, env\(safe-area-inset-right\)\);[\s\S]*?padding-bottom: max\(8px, env\(safe-area-inset-bottom\)\);[\s\S]*?padding-left: max\(59px, env\(safe-area-inset-left\)\);/);
   assert.match(settingsCssSource, /\.settings-dialog-surface,[\s\S]*?\.config-panel-root\.is-modal > \.config-panel-surface \{[\s\S]*?max-width: 100%;[\s\S]*?max-height: 100%;/);
 });
+
+test("keeps the top bar and lab panel clear of the iOS status bar in standalone mode", () => {
+  assert.match(appShellSource, /className="app-top-bar"/);
+  assert.match(cssSource, /\.app-top-bar \{\s*padding-top: max\(54px, env\(safe-area-inset-top\)\) !important;/);
+  assert.match(cssSource, /\.lab-panel-header \{\s*padding-top: max\(54px, env\(safe-area-inset-top\)\) !important;/);
+  assert.match(labPanelSource, /paddingTop: "max\(12px, env\(safe-area-inset-top\)\)"/);
+  assert.match(labPanelSource, /paddingBottom: "env\(safe-area-inset-bottom\)"/);
+});
+

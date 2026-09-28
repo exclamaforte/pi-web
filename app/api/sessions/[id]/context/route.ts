@@ -19,9 +19,10 @@ export async function GET(
   const before = url.searchParams.get("before") ?? undefined;
 
   try {
+    const cwd = url.searchParams.get("cwd") ?? undefined;
     const rpc = getRpcSession(id);
     const liveRpc = rpc?.isAlive() ? rpc : undefined;
-    const filePath = liveRpc ? null : await resolveSessionPath(id);
+    const filePath = liveRpc ? null : await resolveSessionPath(id, cwd);
     if (!liveRpc && !filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }

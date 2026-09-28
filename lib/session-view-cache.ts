@@ -74,34 +74,41 @@ function evictToFit(): void {
 	}
 }
 
-export function getSessionViewSnapshot(sessionId: string): SessionViewSnapshot | null {
-	const snapshot = cache().get(sessionId);
+function cacheKey(sessionId: string, cwd?: string): string {
+	return cwd ? `${cwd}:${sessionId}` : sessionId;
+}
+
+export function getSessionViewSnapshot(sessionId: string, cwd?: string): SessionViewSnapshot | null {
+	const key = cacheKey(sessionId, cwd);
+	const snapshot = cache().get(key) ?? (cwd ? undefined : cache().get(sessionId));
 	if (!snapshot) return null;
 	if (Date.now() - snapshot.savedAt > TTL_MS) {
-		cache().delete(sessionId);
+		cache().delete(key);
 		return null;
 	}
 	// LRU touch.
-	cache().delete(sessionId);
-	cache().set(sessionId, snapshot);
+	cache().delete(key);
+	cache().set(key, snapshot);
 	return snapshot;
 }
 
 /** Store a snapshot; returns false when it was refused (oversize/invalid). */
-export function setSessionViewSnapshot(snapshot: Omit<SessionViewSnapshot, "savedAt">): boolean {
+export function setSessionViewSnapshot(snapshot: Omit<SessionViewSnapshot, "savedAt">, cwd?: string): boolean {
 	if (!snapshot.sessionId || !snapshot.revision) return false;
+	const key = cacheKey(snapshot.sessionId, cwd);
 	const store = cache();
-	store.delete(snapshot.sessionId);
+	store.delete(key);
 	const entry: SessionViewSnapshot = { ...snapshot, savedAt: Date.now() };
 	const bytes = snapshotBytes(entry);
 	if (bytes > MAX_TOTAL_BYTES) return false;
-	store.set(entry.sessionId, entry);
+	store.set(key, entry);
 	evictToFit();
-	return cache().has(entry.sessionId);
+	return cache().has(key);
 }
 
-export function deleteSessionViewSnapshot(sessionId: string): void {
-	cache().delete(sessionId);
+export function deleteSessionViewSnapshot(sessionId: string, cwd?: string): void {
+	cache().delete(cacheKey(sessionId, cwd));
+	if (cwd) cache().delete(sessionId);
 }
 
 export function clearSessionViewCache(): void {

@@ -163,7 +163,7 @@ test("session listing supports cheap summaries and honors force refresh", () => 
 test("session reads use the live SessionManager before requiring a JSONL path", () => {
   for (const source of [detailRoute, contextRoute]) {
     const liveLookup = source.indexOf("getRpcSession(id)");
-    const pathLookup = source.indexOf("resolveSessionPath(id)");
+    const pathLookup = source.indexOf("resolveSessionPath(id");
     assert.ok(liveLookup >= 0);
     assert.ok(pathLookup > liveLookup);
     // openSessionManager is the cached read-only opener; the live wrapper's

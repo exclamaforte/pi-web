@@ -37,6 +37,7 @@ export async function GET(
     const rpc = getRpcSession(id);
     const searchParams = new URL(req.url).searchParams;
     const force = searchParams.get("force") === "1";
+    const cwd = searchParams.get("cwd") || undefined;
 
     // A live wrapper only reflects the appends pi-web itself made. When another
     // pi process (the TUI) writes the same session file, the in-memory index
@@ -50,7 +51,7 @@ export async function GET(
       liveWrapper = undefined;
     }
     const liveRpc = liveWrapper;
-    const resolvedPath = liveRpc ? null : await resolveSessionPath(id);
+    const resolvedPath = liveRpc ? null : await resolveSessionPath(id, cwd);
     if (!liveRpc && !resolvedPath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }

@@ -618,7 +618,8 @@ export function AppShell() {
     if (!lastOpenSessionId) return;
     const adopt = (d: { sessions: SessionInfo[] } | null) => {
       if (token !== workspaceRestoreTokenRef.current) return; // stale switch
-      const s = d?.sessions.find((x) => x.id === lastOpenSessionId);
+      const s = d?.sessions.find((x) => x.id === lastOpenSessionId && (!cwd || x.cwd === cwd))
+        ?? d?.sessions.find((x) => x.id === lastOpenSessionId);
       if (!s) {
         // The list loaded but the remembered session is gone — forget it.
         // When the list itself failed (d === null) keep the memory so a
@@ -644,8 +645,12 @@ export function AppShell() {
       // the restored session's messages.
       setSelectedSession(s);
       setSessionKey((k) => k + 1);
-      if (new URLSearchParams(window.location.search).get("session") !== s.id) {
-        router.replace(`?session=${encodeURIComponent(s.id)}`, { scroll: false });
+      const currentParams = new URLSearchParams(window.location.search);
+      if (currentParams.get("session") !== s.id || (s.cwd && currentParams.get("cwd") !== s.cwd)) {
+        const q = new URLSearchParams();
+        q.set("session", s.id);
+        if (s.cwd) q.set("cwd", s.cwd);
+        router.replace(`?${q.toString()}`, { scroll: false });
       }
     };
     // Fast path: the sidebar already delivered the catalogue — restore
@@ -822,14 +827,14 @@ export function AppShell() {
   // server-computed projectKey, which the same-project check in
   // handleCwdChange relies on. Hydrate it from the session list so switching
   // worktrees right after creating a session doesn't close the chat.
-  const hydrateSelectedSession = useCallback((sessionId: string) => {
+  const hydrateSelectedSession = useCallback((sessionId: string, cwd?: string) => {
     void fetch("/api/sessions", { cache: "no-store" })
       .then((r) => (r.ok ? (r.json() as Promise<{ sessions: SessionInfo[] }>) : null))
       .then((d) => {
-        const full = d?.sessions.find((s) => s.id === sessionId);
+        const full = d?.sessions.find((s) => s.id === sessionId && (!cwd || s.cwd === cwd));
         if (!full) return;
         setSelectedSession((prev) => (
-          prev?.id === sessionId
+          prev?.id === sessionId && (!cwd || prev.cwd === cwd)
             ? { ...prev, ...full, transient: full.transient ?? false }
             : prev
         ));
@@ -837,16 +842,19 @@ export function AppShell() {
       .catch(() => {});
   }, []);
 
-  const handleOpenSession = useCallback(async (sessionId: string) => {
+  const handleOpenSession = useCallback(async (sessionId: string, cwd?: string) => {
     // Prefer the catalogue the sidebar already delivered: selecting from it
     // avoids a full detail round trip just to obtain the SessionInfo.
-    const catalogued = sessionCatalog.find((s) => s.id === sessionId);
+    const catalogued = sessionCatalog.find((s) => s.id === sessionId && (!cwd || s.cwd === cwd));
     if (catalogued && !catalogued.transient) {
       handleSelectSession(catalogued);
       return;
     }
     try {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { cache: "no-store" });
+      const url = cwd
+        ? `/api/sessions/${encodeURIComponent(sessionId)}?cwd=${encodeURIComponent(cwd)}`
+        : `/api/sessions/${encodeURIComponent(sessionId)}`;
+      const response = await fetch(url, { cache: "no-store" });
       const data = await response.json() as { info?: SessionInfo; error?: string };
       if (!response.ok || !data.info) throw new Error(data.error ?? `HTTP ${response.status}`);
       handleSelectSession(data.info);
@@ -1311,10 +1319,7 @@ export function AppShell() {
       <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
         <button
           type="button"
-          onClick={() => {
-            setLabPanelOpen(true);
-            if (mobile && isNarrowMobile) setMobileToolbarMoreOpen(false);
-          }}
+          onClick={() => setLabPanelOpen(true)}
           title="Lab Management"
           aria-label="Lab Management"
           style={{
@@ -1982,7 +1987,7 @@ export function AppShell() {
       <div inert={rightPanelFullWidth} style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Top bar with sidebar toggle */}
         <div ref={topBarRef} style={{ flexShrink: 0, background: "var(--bg-panel)" }}>
-        <div style={{ display: "flex", alignItems: "center", position: "relative", borderBottom: "1px solid var(--border)", height: "calc(36px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)" }}>
+        <div className="app-top-bar" style={{ display: "flex", alignItems: "center", position: "relative", borderBottom: "1px solid var(--border)", height: "calc(36px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)" }}>
           <button
             onClick={handleSidebarToggle}
              title={sidebarOpen ? translate("sidebar.hide") : translate("sidebar.show")}
@@ -2459,7 +2464,7 @@ export function AppShell() {
         } as React.CSSProperties}
       >
         {/* Right panel tab bar */}
-        <div style={{
+        <div className="right-panel-tab-bar" style={{
           display: "flex",
           alignItems: "center",
           flexShrink: 0,
@@ -2587,8 +2592,8 @@ export function AppShell() {
       <LabPanel
         currentCwd={activeCwd}
         onClose={() => setLabPanelOpen(false)}
-        onOpenSession={(_cwd, sid) => {
-          handleOpenSession(sid);
+        onOpenSession={(cwd, sid) => {
+          handleOpenSession(sid, cwd);
           setLabPanelOpen(false);
         }}
       />

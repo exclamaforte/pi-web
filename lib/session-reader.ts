@@ -176,11 +176,11 @@ export function mergeSessionLists(
   persistedSessions: SessionInfo[],
   supplementalSessions: SessionInfo[],
 ): SessionInfo[] {
-  const byId = new Map(supplementalSessions.map((session) => [session.id, session]));
-  // A disk scan is authoritative once the JSONL exists. In particular, this
-  // replaces a transient registry snapshot without briefly rendering two rows.
-  for (const session of persistedSessions) byId.set(session.id, session);
-  return [...byId.values()].sort((a, b) => b.modified.localeCompare(a.modified));
+  const byKey = new Map<string, SessionInfo>();
+  const sessionKey = (s: SessionInfo) => s.path || `${s.cwd || ""}:${s.id}`;
+  for (const session of supplementalSessions) byKey.set(sessionKey(session), session);
+  for (const session of persistedSessions) byKey.set(sessionKey(session), session);
+  return [...byKey.values()].sort((a, b) => b.modified.localeCompare(a.modified));
 }
 
 type ScannedSubagent = NonNullable<ReturnType<typeof readSubagentRun>>;
@@ -208,6 +208,9 @@ function mapScannedSession(
   pathToId: Map<string, string>,
 ): SessionInfo {
   cacheSessionPath(scanned.id, scanned.path);
+  if (scanned.cwd) {
+    cacheSessionPath(`${scanned.cwd}:${scanned.id}`, scanned.path);
+  }
   const { originSessionId, subagent } = resolveScannedSessionRelation(scanned, pathToId);
   const detailsPending = scanned.detailsPending === true;
   return {
@@ -542,9 +545,49 @@ export function openSessionManager(
   return sm;
 }
 
-export async function resolveSessionPath(sessionId: string): Promise<string | null> {
-  const cached = getPathCache().get(sessionId);
+export function sessionDirForCwd(cwd: string): string {
+  const normalized = cwd.replace(/^[/\\]+|[/\\]+$/g, "").replace(/[/\\]/g, "-");
+  return join(defaultSessionsDir(), `--${normalized}--`);
+}
+
+export async function findSessionPathByIdAndCwd(sessionId: string, cwd: string): Promise<string | null> {
+  const projectPath = sessionDirForCwd(cwd);
+  let files: string[];
+  try {
+    files = await readdir(projectPath);
+  } catch {
+    return null;
+  }
+  const suffix = `_${sessionId}.jsonl`;
+  let latestMatch: { file: string; mtime: number } | null = null;
+  for (const file of files) {
+    if (!file.endsWith(suffix)) continue;
+    const fullPath = join(projectPath, file);
+    try {
+      if (readSessionHeader(fullPath)?.id !== sessionId) continue;
+      const st = statSync(fullPath);
+      if (!latestMatch || st.mtimeMs > latestMatch.mtime) {
+        latestMatch = { file: fullPath, mtime: st.mtimeMs };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return latestMatch?.file ?? null;
+}
+
+export async function resolveSessionPath(sessionId: string, cwd?: string): Promise<string | null> {
+  const cacheKey = cwd ? `${cwd}:${sessionId}` : sessionId;
+  const cached = getPathCache().get(cacheKey);
   if (cached) return cached;
+
+  if (cwd) {
+    const cwdMatch = await findSessionPathByIdAndCwd(sessionId, cwd);
+    if (cwdMatch) {
+      cacheSessionPath(cacheKey, cwdMatch);
+      return cwdMatch;
+    }
+  }
 
   const targetedPath = await findSessionPathById(sessionId);
   if (targetedPath) {
@@ -555,7 +598,7 @@ export async function resolveSessionPath(sessionId: string): Promise<string | nu
   // Unknown layouts, malformed candidates, and duplicate IDs retain the
   // existing authoritative catalogue scan instead of negative-caching a miss.
   await listAllSessions();
-  return getPathCache().get(sessionId) ?? null;
+  return getPathCache().get(cacheKey) ?? getPathCache().get(sessionId) ?? null;
 }
 
 export async function resolveSessionIdByPath(filePath: string): Promise<string | undefined> {
@@ -631,28 +674,57 @@ export function getLatestModelChange(entries: SessionEntry[]): SessionContext["m
   return null;
 }
 
+function isSameModel(a: SessionContext["model"], b: SessionContext["model"]): boolean {
+  if (!a || !b) return false;
+  if (a.provider !== b.provider) return false;
+  if (a.modelId === b.modelId) return true;
+  if (a.modelId.endsWith(`/${b.modelId}`) || b.modelId.endsWith(`/${a.modelId}`)) return true;
+  return false;
+}
+
 function getSessionSettings(entries: SessionEntry[], leafId?: string | null): Pick<SessionContext, "thinkingLevel" | "model"> {
   if (leafId === null) return { thinkingLevel: "off", model: null };
   const branch = sliceActiveBranch(entries, leafId ?? null, entries.length);
   let thinkingLevel: string | undefined;
   let responseModel: SessionContext["model"] | undefined;
+  let responseModelIndex = -1;
+  let modelChangeModel: SessionContext["model"] | undefined;
+  let modelChangeIndex = -1;
 
-  for (let i = branch.length - 1; i >= 0 && (thinkingLevel === undefined || responseModel === undefined); i--) {
+  for (let i = branch.length - 1; i >= 0 && (thinkingLevel === undefined || responseModel === undefined || modelChangeModel === undefined); i--) {
     const entry = branch[i];
     if (thinkingLevel === undefined && entry.type === "thinking_level_change") {
       thinkingLevel = entry.thinkingLevel;
     }
-    if (responseModel === undefined && entry.type === "message" && entry.message.role === "assistant") {
+    if (modelChangeModel === undefined && entry.type === "model_change") {
+      modelChangeModel = { provider: entry.provider, modelId: entry.modelId };
+      modelChangeIndex = i;
+    }
+    if (responseModel === undefined && entry.type === "message" && entry.message?.role === "assistant") {
       const message = entry.message as { provider?: unknown; model?: unknown };
       if (typeof message.provider === "string" && typeof message.model === "string") {
         responseModel = { provider: message.provider, modelId: message.model };
+        responseModelIndex = i;
       }
     }
   }
 
+  let activeModel: SessionContext["model"] = null;
+  if (modelChangeModel && responseModel) {
+    if (modelChangeIndex > responseModelIndex) {
+      activeModel = modelChangeModel;
+    } else if (isSameModel(responseModel, modelChangeModel)) {
+      activeModel = modelChangeModel;
+    } else {
+      activeModel = responseModel;
+    }
+  } else {
+    activeModel = modelChangeModel ?? responseModel ?? null;
+  }
+
   return {
     thinkingLevel: thinkingLevel ?? "off",
-    model: getLatestModelChange(branch) ?? responseModel ?? null,
+    model: activeModel,
   };
 }
 

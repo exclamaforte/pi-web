@@ -375,15 +375,22 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
+        paddingBottom: "env(safe-area-inset-bottom)",
+        paddingLeft: "env(safe-area-inset-left)",
+        paddingRight: "env(safe-area-inset-right)",
       }}
     >
       {/* Top Header Bar */}
       <div
+        className="lab-panel-header"
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: isMobile ? "10px 14px" : "12px 20px",
+          paddingTop: "max(12px, env(safe-area-inset-top))",
+          paddingRight: isMobile ? "max(14px, env(safe-area-inset-right))" : "20px",
+          paddingBottom: isMobile ? "10px" : "12px",
+          paddingLeft: isMobile ? "max(14px, env(safe-area-inset-left))" : "20px",
           borderBottom: "1px solid var(--border)",
           background: "var(--bg-panel)",
           gap: 12,
@@ -1287,7 +1294,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            padding: 16,
+            padding: "max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))",
           }}
           onClick={() => setSteerModalRole(null)}
         >
@@ -1374,7 +1381,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            padding: 16,
+            padding: "max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))",
           }}
           onClick={() => setSendModalRole(null)}
         >
@@ -1461,7 +1468,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            padding: 16,
+            padding: "max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))",
           }}
           onClick={() => setSelectedBead(null)}
         >
@@ -1607,7 +1614,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            padding: 16,
+            padding: "max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))",
           }}
           onClick={() => setViewGpuJob(null)}
         >
@@ -1672,7 +1679,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            padding: 16,
+            padding: "max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))",
           }}
           onClick={() => setViewExperiment(null)}
         >

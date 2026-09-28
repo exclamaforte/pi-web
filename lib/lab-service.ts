@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import net from "node:net";
@@ -467,6 +467,80 @@ export function getDaemonLogTail(labPath: string, maxLines = 100): string[] {
   }
 }
 
+/** Resolve the actual active model from the worker's session file */
+export function getActualWorkerModel(
+  labPath: string,
+  sessionId: string,
+  fallbackModel?: string,
+): string | undefined {
+  try {
+    const sessionsDir = join(homedir(), ".pi", "agent", "sessions");
+    const slug = "--" + labPath.replace(/^[/\\]+|[/\\]+$/g, "").replace(/[/\\]/g, "-") + "--";
+    const projectDir = join(sessionsDir, slug);
+    if (!existsSync(projectDir)) return fallbackModel;
+
+    const files = readdirSync(projectDir);
+    const suffix = `_${sessionId}.jsonl`;
+    const matchingFiles = files.filter((f) => f.endsWith(suffix));
+    if (matchingFiles.length === 0) return fallbackModel;
+
+    let latestPath = join(projectDir, matchingFiles[0]);
+    let latestMtime = statSync(latestPath).mtimeMs;
+    for (let i = 1; i < matchingFiles.length; i++) {
+      const p = join(projectDir, matchingFiles[i]);
+      const m = statSync(p).mtimeMs;
+      if (m > latestMtime) {
+        latestMtime = m;
+        latestPath = p;
+      }
+    }
+
+    const size = statSync(latestPath).size;
+    const tailReadLen = Math.min(size, 65536);
+    const fd = openSync(latestPath, "r");
+    const buf = Buffer.alloc(tailReadLen);
+    readSync(fd, buf, 0, tailReadLen, Math.max(0, size - tailReadLen));
+    closeSync(fd);
+
+    const tailText = buf.toString("utf8");
+    const tailLines = tailText.split("\n");
+    for (let i = tailLines.length - 1; i >= 0; i--) {
+      const line = tailLines[i].trim();
+      if (!line) continue;
+      try {
+        const d = JSON.parse(line);
+        if (d.type === "model_change" && d.modelId) {
+          return d.provider ? `${d.provider}/${d.modelId}` : d.modelId;
+        }
+        if (d.type === "message" && d.message?.role === "assistant" && d.message.model) {
+          return d.message.provider ? `${d.message.provider}/${d.message.model}` : d.message.model;
+        }
+      } catch {}
+    }
+
+    const headReadLen = Math.min(size, 16384);
+    const fdHead = openSync(latestPath, "r");
+    const bufHead = Buffer.alloc(headReadLen);
+    readSync(fdHead, bufHead, 0, headReadLen, 0);
+    closeSync(fdHead);
+
+    const headLines = bufHead.toString("utf8").split("\n");
+    for (const line of headLines) {
+      if (!line.trim()) continue;
+      try {
+        const d = JSON.parse(line);
+        if (d.type === "model_change" && d.modelId) {
+          return d.provider ? `${d.provider}/${d.modelId}` : d.modelId;
+        }
+      } catch {}
+    }
+
+    return fallbackModel;
+  } catch {
+    return fallbackModel;
+  }
+}
+
 /** Read full status of a lab */
 export async function getFullLabStatus(labPath: string): Promise<LabFullStatus> {
   const absPath = resolve(labPath);
@@ -546,6 +620,14 @@ export async function getFullLabStatus(labPath: string): Promise<LabFullStatus> 
           }
         }
       }
+    }
+  }
+
+  // Enrich workers with their actual live model from session files
+  for (const w of Object.values(workers)) {
+    const actualModel = getActualWorkerModel(absPath, w.sessionId, w.model);
+    if (actualModel) {
+      w.model = actualModel;
     }
   }
 

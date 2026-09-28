@@ -538,8 +538,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     let messagesLoaded = false;
     try {
       if (showLoading) setLoading(true);
+      const effectiveCwd = (session?.cwd || newSessionCwd) || undefined;
       const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1", tree: "summary" });
       if (options?.force) params.set("force", "1");
+      if (effectiveCwd) params.set("cwd", effectiveCwd);
       const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}?${params}`);
       if (res.status === 404) {
         if (showLoading) {
@@ -551,7 +553,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setHasEarlierMessages(false);
           setError(null);
         }
-        deleteSessionViewSnapshot(sid);
+        deleteSessionViewSnapshot(sid, effectiveCwd);
         return null;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -561,7 +563,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // revision), keep any history the user already paged in instead of
       // collapsing back to the fresh 50-entry window. The state hooks then
       // only need the server's tree/leaf/stats — never a history reset.
-      const cached = getSessionViewSnapshot(sid);
+      const cached = getSessionViewSnapshot(sid, effectiveCwd);
       const revisionUnchanged = Boolean(
         d.snapshotRevision
         && cached?.revision === d.snapshotRevision
@@ -598,7 +600,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           stats: d.stats,
           totalActiveMs: d.totalActiveMs,
           loadedEntryIds: entryIdsRef.current,
-        });
+        }, effectiveCwd);
       } else {
         setMessages(persistedMessages);
         setEntryIds(d.context.entryIds ?? []);
@@ -627,7 +629,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           stats: d.stats,
           totalActiveMs: d.totalActiveMs,
           loadedEntryIds: d.context.entryIds ?? [],
-        });
+        }, effectiveCwd);
       }
       if (d.wrapperRebuilt) {
         eventConnectionRef.current?.close();
@@ -680,7 +682,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const loadContext = useCallback(async (sid: string, leafId: string | null, before?: string | null, options?: { tail?: number; signal?: AbortSignal }) => {
     try {
+      const effectiveCwd = session?.cwd || newSessionCwd;
       const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
+      if (effectiveCwd) params.set("cwd", effectiveCwd);
       if (leafId) params.set("leafId", leafId);
       // Page upward: ask the server for the `tail` ancestors preceding `before`,
       // then prepend them. Omitting `before` fetches the most-recent `tail`.
@@ -2204,7 +2208,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // run the normal forced read in the background as the freshness check.
       // Only the settled history fields are restored — no streaming, queue, or
       // run state — and the background read remains authoritative.
-      const cached = getSessionViewSnapshot(session.id);
+      const cached = getSessionViewSnapshot(session.id, session.cwd);
       if (cached) {
         setData({
           sessionId: session.id,
@@ -2277,7 +2281,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const sid = sessionIdRef.current;
       const currentData = dataRef.current;
       if (sid && currentData && currentData.sessionId === sid && currentData.snapshotRevision) {
-        const existing = getSessionViewSnapshot(sid);
+        const existing = getSessionViewSnapshot(sid, session?.cwd);
         const entryIds = entryIdsRef.current;
         const coverable = !existing || entryIds.every((id) => existing.entryIds.includes(id) || (existing.loadedEntryIds ?? []).includes(id));
         if (coverable) {
@@ -2295,9 +2299,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             stats: currentData.stats,
             totalActiveMs: currentData.totalActiveMs,
             loadedEntryIds: entryIdsRef.current,
-          });
+          }, session?.cwd);
         } else {
-          deleteSessionViewSnapshot(sid);
+          deleteSessionViewSnapshot(sid, session?.cwd);
         }
       }
       if (liveFollowFrameRef.current !== null) {

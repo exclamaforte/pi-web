@@ -10,6 +10,7 @@ import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { openFileTab, saveFileViewerState } from "./file-tab-state";
 import { SettingsPanel, SettingsSectionIcon } from "./SettingsPanel";
+import { LabPanel } from "./lab/LabPanel";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator, hasSessionBranches } from "./BranchNavigator";
 import { SystemPromptPanel } from "./SystemPromptPanel";
@@ -172,6 +173,10 @@ export function AppShell() {
   }, []);
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
   const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
+  const [labPanelOpen, setLabPanelOpen] = useState(false);
+  const handleOpenLabDashboard = useCallback(() => {
+    setLabPanelOpen(true);
+  }, []);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [projectTrust, setProjectTrust] = useState<ProjectTrustStatus | null>(null);
   const [projectTrustDialogOpen, setProjectTrustDialogOpen] = useState(false);
@@ -1307,6 +1312,44 @@ export function AppShell() {
         <button
           type="button"
           onClick={() => {
+            setLabPanelOpen(true);
+            if (mobile && isNarrowMobile) setMobileToolbarMoreOpen(false);
+          }}
+          title="Lab Management"
+          aria-label="Lab Management"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            width: mobile ? TOP_BAR_ICON_BUTTON_SIZE : undefined,
+            height: "100%",
+            padding: mobile ? 0 : "0 12px",
+            background: "none",
+            border: "none",
+            borderTop: "2px solid transparent",
+            borderRight: "1px solid var(--border)",
+            color: "var(--accent)",
+            fontWeight: 600,
+            cursor: "pointer",
+            flexShrink: 0,
+            fontSize: 11,
+            whiteSpace: "nowrap",
+            transition: "color 0.1s, background 0.1s",
+          }}
+          onMouseEnter={(event) => {
+            event.currentTarget.style.background = "var(--bg-hover)";
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.background = "none";
+          }}
+        >
+          <span style={{ fontSize: 13 }}>🧪</span>
+          {!mobile && <span>Lab</span>}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
             handleViewFullHistory();
             if (mobile && isNarrowMobile) setMobileToolbarMoreOpen(true);
           }}
@@ -2310,6 +2353,7 @@ export function AppShell() {
             <ChatWindow
               key={sessionKey}
               session={selectedSession}
+              onOpenLabDashboard={handleOpenLabDashboard}
               searchTarget={searchTarget?.sessionId === selectedSession?.id ? searchTarget : null}
               onSearchTargetHandled={handleSearchTargetHandled}
               initialScrollPosition={selectedSession ? sessionScrollPositionsRef.current.get(selectedSession.id) ?? null : null}
@@ -2537,6 +2581,16 @@ export function AppShell() {
           if (!projectTrustBusy) setProjectTrustDialogOpen(false);
         }}
         onConfirm={() => void handleTrustProject()}
+      />
+    )}
+    {labPanelOpen && (
+      <LabPanel
+        currentCwd={activeCwd}
+        onClose={() => setLabPanelOpen(false)}
+        onOpenSession={(_cwd, sid) => {
+          handleOpenSession(sid);
+          setLabPanelOpen(false);
+        }}
       />
     )}
     </>

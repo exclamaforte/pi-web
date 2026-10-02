@@ -144,7 +144,11 @@ test("does not expose disk-backed actions for transient sessions", () => {
 
 test("hides subagent rows and aggregates their state into the main session row", () => {
   assert.match(source, /const sessionFamilies = useMemo\(\(\) => listSessionFamilies\(filteredSessions\)/);
-  assert.match(source, /familySessions\.some\(\(session\) => session\.id === selectedSessionId\)/);
-  assert.match(source, /familySessions\.some\(\(session\) => runningSessionIds\.has\(session\.id\)\)/);
+  assert.match(source, /familySessions\.some\(\(session\) => isSelectedSession\(session\)\)/);
+  assert.match(source, /familySessions\.some\(\(session\) => isSessionRowRunning\(session\)\)/);
   assert.doesNotMatch(source, /function SessionTreeItem/);
+});
+
+test("keeps same-id sessions from different cwds as separate rows", () => {
+  assert.match(source, /key=\{family\.root\.path \|\| `\$\{family\.root\.cwd\}::\$\{family\.root\.id\}`\}/);
 });

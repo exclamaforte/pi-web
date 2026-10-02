@@ -891,7 +891,7 @@ export function PluginsConfig({
     setActionError(null);
     setActionMessage(null);
     try {
-      await sendAgentCommand(sessionId, { type: "reload" });
+      await sendAgentCommand(sessionId, { type: "reload" }, cwd);
       onReloaded?.();
       await loadPlugins();
       setActionMessage("Session reloaded.");
@@ -900,7 +900,7 @@ export function PluginsConfig({
     } finally {
       setBusyKey(null);
     }
-  }, [loadPlugins, onReloaded, sessionId]);
+  }, [cwd, loadPlugins, onReloaded, sessionId]);
 
   const addBusy = busyKey?.startsWith("install:") ?? false;
   const availableUpdateCount = Object.values(updateStatuses).filter(

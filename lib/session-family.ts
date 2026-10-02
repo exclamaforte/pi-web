@@ -6,37 +6,63 @@ export interface SessionFamily {
   latestModified: string;
 }
 
+// Session identity is (cwd, id): lab workers reuse `lab-<role>` in every lab
+// directory, so keying families by id alone merges two labs' rows into one.
+function familyKeyOf(session: Pick<SessionInfo, "id" | "cwd">): string {
+  return session.cwd ? `${session.cwd}::${session.id}` : session.id;
+}
+
 function resolveFamilyRoots(sessions: readonly SessionInfo[]): Map<string, string | null> {
-  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const byKey = new Map(sessions.map((session) => [familyKeyOf(session), session]));
+  const byId = new Map<string, SessionInfo[]>();
+  for (const session of sessions) {
+    const list = byId.get(session.id);
+    if (list) list.push(session);
+    else byId.set(session.id, [session]);
+  }
   const roots = new Map<string, string | null>();
 
+  const resolveParent = (session: SessionInfo, parentId: string): SessionInfo | undefined => {
+    const sameCwd = session.cwd
+      ? byKey.get(session.cwd ? `${session.cwd}::${parentId}` : parentId)
+      : undefined;
+    if (sameCwd) return sameCwd;
+    const candidates = byId.get(parentId);
+    if (!candidates || candidates.length !== 1) return undefined;
+    return candidates[0];
+  };
+
   for (const session of sessions) {
-    if (roots.has(session.id)) continue;
+    const key = familyKeyOf(session);
+    if (roots.has(key)) continue;
 
     const path: string[] = [];
     const visited = new Set<string>();
-    let currentId = session.id;
-    let rootId: string | null = null;
+    let currentKey = key;
+    let current: SessionInfo | undefined = session;
+    let rootKey: string | null = null;
 
     while (true) {
-      if (roots.has(currentId)) {
-        rootId = roots.get(currentId) ?? null;
+      if (roots.has(currentKey)) {
+        rootKey = roots.get(currentKey) ?? null;
         break;
       }
-      if (visited.has(currentId)) break;
+      if (visited.has(currentKey)) break;
 
-      visited.add(currentId);
-      path.push(currentId);
-      const current = byId.get(currentId);
+      visited.add(currentKey);
+      path.push(currentKey);
       if (!current) break;
       if (current.relation?.kind !== "subagent") {
-        rootId = current.id;
+        rootKey = currentKey;
         break;
       }
-      currentId = current.relation.parentSessionId;
+      const parent = resolveParent(current, current.relation.parentSessionId);
+      if (!parent) break;
+      current = parent;
+      currentKey = familyKeyOf(parent);
     }
 
-    for (const id of path) roots.set(id, rootId);
+    for (const id of path) roots.set(id, rootKey);
   }
 
   return roots;
@@ -44,12 +70,12 @@ function resolveFamilyRoots(sessions: readonly SessionInfo[]): Map<string, strin
 
 /** Groups visible main/fork sessions with every persisted subagent descendant. */
 export function listSessionFamilies(sessions: readonly SessionInfo[]): SessionFamily[] {
-  const rootsBySessionId = resolveFamilyRoots(sessions);
+  const rootsBySessionKey = resolveFamilyRoots(sessions);
   const families = new Map<string, SessionFamily>();
 
   for (const session of sessions) {
     if (session.relation?.kind === "subagent") continue;
-    families.set(session.id, {
+    families.set(familyKeyOf(session), {
       root: session,
       subagents: [],
       latestModified: session.modified,
@@ -58,8 +84,8 @@ export function listSessionFamilies(sessions: readonly SessionInfo[]): SessionFa
 
   for (const session of sessions) {
     if (session.relation?.kind !== "subagent") continue;
-    const rootId = rootsBySessionId.get(session.id);
-    const family = rootId ? families.get(rootId) : undefined;
+    const rootKey = rootsBySessionKey.get(familyKeyOf(session));
+    const family = rootKey ? families.get(rootKey) : undefined;
     if (!family) continue;
     family.subagents.push(session);
     if (session.modified > family.latestModified) family.latestModified = session.modified;
@@ -71,9 +97,19 @@ export function listSessionFamilies(sessions: readonly SessionInfo[]): SessionFa
 export function getSessionFamily(
   sessions: readonly SessionInfo[],
   sessionId: string | null | undefined,
+  cwd?: string | null,
 ): SessionFamily | null {
   if (!sessionId) return null;
-  return listSessionFamilies(sessions).find((family) => (
+  const families = listSessionFamilies(sessions);
+  if (cwd) {
+    const key = `${cwd}::${sessionId}`;
+    const exact = families.find((family) => (
+      familyKeyOf(family.root) === key
+      || family.subagents.some((session) => familyKeyOf(session) === key)
+    ));
+    if (exact) return exact;
+  }
+  return families.find((family) => (
     family.root.id === sessionId
     || family.subagents.some((session) => session.id === sessionId)
   )) ?? null;

@@ -5,21 +5,22 @@ import { getRpcSession, startRpcSession } from "@/lib/rpc-manager";
 import { invalidateSessionListCache, resolveSessionPath } from "@/lib/session-reader";
 
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const cwd = new URL(req.url).searchParams.get("cwd") || undefined;
 
   try {
-    const filePath = await resolveSessionPath(id);
+    const filePath = await resolveSessionPath(id, cwd);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const existing = getRpcSession(id);
+    const existing = getRpcSession(id, cwd);
     const { session } = existing?.isAlive()
       ? { session: existing }
-      : await startRpcSession(id, filePath, undefined);
+      : await startRpcSession(id, filePath, cwd);
 
     // globalThis keeps wrappers alive across dev hot reloads; older instances
     // may predate waitUntilReady(), but those have already completed startup.

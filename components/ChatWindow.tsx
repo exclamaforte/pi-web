@@ -38,8 +38,8 @@ import { LabSessionBanner } from "./lab/LabSessionBanner";
 interface Props {
   session: SessionInfo | null;
   onOpenLabDashboard?: (labPath?: string) => void;
-  searchTarget?: { sessionId: string; entryId: string; blockIndex?: number } | null;
-  onSearchTargetHandled?: (target: { sessionId: string; entryId: string }) => void;
+  searchTarget?: { sessionId: string; cwd?: string | null; entryId: string; blockIndex?: number } | null;
+  onSearchTargetHandled?: (target: { sessionId: string; cwd?: string | null; entryId: string }) => void;
   initialScrollPosition?: ChatScrollPosition | null;
   onScrollPositionChange?: (sessionId: string, position: ChatScrollPosition) => void;
   sessionRunning?: boolean;
@@ -60,7 +60,7 @@ interface Props {
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
   onOpenFile?: (filePath: string, page?: number) => void;
   onOpenSession?: (sessionId: string) => void;
-  onAskInNewChat?: (prompt: string, sourceSessionId: string, sourceEntryId: string) => Promise<void>;
+  onAskInNewChat?: (prompt: string, sourceSessionId: string, sourceEntryId: string, sourceCwd?: string) => Promise<void>;
   quoteSelectionEnabled?: boolean;
   initialPrompt?: string;
   onInitialPromptConsumed?: () => void;
@@ -434,6 +434,7 @@ export function ChatWindow({ session, onOpenLabDashboard, searchTarget, onSearch
         prompt,
         sourceSessionId,
         quotedSelection.sourceEntryId,
+        session?.cwd ?? undefined,
       );
       closeQuotedSelection();
     } catch (error) {
@@ -442,7 +443,7 @@ export function ChatWindow({ session, onOpenLabDashboard, searchTarget, onSearch
     } finally {
       setQuoteSubmitting(false);
     }
-  }, [onAskInNewChat, quotedSelection, quoteSubmitting, session?.id, sessionIdRef, closeQuotedSelection, unlockAudio]);
+  }, [onAskInNewChat, quotedSelection, quoteSubmitting, session?.id, session?.cwd, sessionIdRef, closeQuotedSelection, unlockAudio]);
 
   const initialPromptSentRef = useRef(false);
   useEffect(() => {

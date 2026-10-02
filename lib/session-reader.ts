@@ -206,8 +206,16 @@ function resolveScannedSessionRelation(
 function mapScannedSession(
   scanned: ScannedSessionInfo,
   pathToId: Map<string, string>,
+  idCounts: Map<string, number>,
 ): SessionInfo {
-  cacheSessionPath(scanned.id, scanned.path);
+  // A bare-id cache entry is only safe when the id is globally unique. Lab
+  // workers reuse `lab-<role>` in every lab directory, so caching the bare id
+  // would point all but one lab at whichever file scanned last.
+  if ((idCounts.get(scanned.id) ?? 0) <= 1) {
+    cacheSessionPath(scanned.id, scanned.path);
+  } else {
+    invalidateSessionPathCache(scanned.id);
+  }
   if (scanned.cwd) {
     cacheSessionPath(`${scanned.cwd}:${scanned.id}`, scanned.path);
   }
@@ -239,8 +247,12 @@ function mapScannedSession(
 
 async function buildSessionList(scanned: ScannedSessionInfo[]): Promise<SessionInfo[]> {
   const pathToId = new Map<string, string>();
-  for (const session of scanned) pathToId.set(sessionPathKey(session.path), session.id);
-  return attachSessionProjectInfo(scanned.map((session) => mapScannedSession(session, pathToId)));
+  const idCounts = new Map<string, number>();
+  for (const session of scanned) {
+    pathToId.set(sessionPathKey(session.path), session.id);
+    idCounts.set(session.id, (idCounts.get(session.id) ?? 0) + 1);
+  }
+  return attachSessionProjectInfo(scanned.map((session) => mapScannedSession(session, pathToId, idCounts)));
 }
 
 async function loadAllSessions(): Promise<SessionInfo[]> {
@@ -597,8 +609,24 @@ export async function resolveSessionPath(sessionId: string, cwd?: string): Promi
 
   // Unknown layouts, malformed candidates, and duplicate IDs retain the
   // existing authoritative catalogue scan instead of negative-caching a miss.
-  await listAllSessions();
-  return getPathCache().get(cacheKey) ?? getPathCache().get(sessionId) ?? null;
+  // When several files share one id (lab workers reuse `lab-<role>` per lab)
+  // a bare-id lookup has no correct answer: only resolve when the catalogue
+  // holds exactly one candidate, otherwise require the caller to pass cwd.
+  const catalogue = await listAllSessions();
+  const candidates = catalogue.filter((session) => session.id === sessionId);
+  if (cwd) {
+    for (const candidate of candidates) {
+      if (!candidate.cwd) continue;
+      try {
+        if (resolvePath(candidate.cwd) === resolvePath(cwd)) return candidate.path;
+      } catch {
+        if (candidate.cwd === cwd) return candidate.path;
+      }
+    }
+    return getPathCache().get(cacheKey) ?? null;
+  }
+  if (candidates.length === 1) return candidates[0].path;
+  return null;
 }
 
 export async function resolveSessionIdByPath(filePath: string): Promise<string | undefined> {

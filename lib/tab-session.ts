@@ -28,7 +28,7 @@ interface StorageLike {
 }
 
 export type TabOpen =
-  | { kind: "session"; sessionId: string }
+  | { kind: "session"; sessionId: string; cwd?: string }
   | { kind: "new"; cwd: string };
 
 function getBrowserStorage(): StorageLike | null {
@@ -48,7 +48,8 @@ function parseTabOpen(raw: string | null): TabOpen | null {
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
       const record = parsed as { kind?: unknown; sessionId?: unknown; cwd?: unknown };
       if (record.kind === "session" && typeof record.sessionId === "string" && record.sessionId) {
-        return { kind: "session", sessionId: record.sessionId };
+        const cwd = typeof record.cwd === "string" && record.cwd ? record.cwd : undefined;
+        return cwd ? { kind: "session", sessionId: record.sessionId, cwd } : { kind: "session", sessionId: record.sessionId };
       }
       if (record.kind === "new" && typeof record.cwd === "string" && record.cwd.trim()) {
         return { kind: "new", cwd: record.cwd };
@@ -79,11 +80,16 @@ export function getTabOpen(
 
 export function setTabOpenSession(
   sessionId: string,
-  storage: StorageLike | null = getBrowserStorage(),
+  cwdOrStorage?: string | StorageLike | null,
+  storageArg?: StorageLike | null,
 ): void {
+  // Second-arg storage is the legacy call shape (tests and older callers);
+  // a string second arg is the session cwd that disambiguates shared ids.
+  const storage = (typeof cwdOrStorage === "string" || cwdOrStorage == null ? storageArg ?? getBrowserStorage() : cwdOrStorage) ?? null;
+  const cwd = typeof cwdOrStorage === "string" ? cwdOrStorage : undefined;
   if (!storage || !sessionId) return;
   try {
-    writeTabOpen({ kind: "session", sessionId }, storage);
+    writeTabOpen(cwd ? { kind: "session", sessionId, cwd } : { kind: "session", sessionId }, storage);
   } catch {
     // storage unavailable — memory is best-effort
   }

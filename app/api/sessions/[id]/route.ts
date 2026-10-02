@@ -15,7 +15,7 @@ import {
   readSessionHeader,
 } from "@/lib/session-reader";
 import { sessionPathKey } from "@/lib/session-path";
-import { abortSubagent, getRpcSession, getRpcSessionInfos } from "@/lib/rpc-manager";
+import { abortSubagent, getRpcSession, getRpcSessionByFile, getRpcSessionInfos } from "@/lib/rpc-manager";
 import { projectTreeForResponse, toSummaryTree } from "@/lib/project-tree";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
 import { computeSessionStats } from "@/lib/session-stats";
@@ -34,10 +34,12 @@ export async function GET(
   const perf = startServerPerf("GET /api/sessions/[id]");
   try {
     perf?.span("resolve");
-    const rpc = getRpcSession(id);
     const searchParams = new URL(req.url).searchParams;
     const force = searchParams.get("force") === "1";
     const cwd = searchParams.get("cwd") || undefined;
+    // The cwd scopes the live-wrapper lookup: two labs may share one session
+    // id (`lab-<role>`), and a bare-id hit could serve the wrong lab's chat.
+    const rpc = getRpcSession(id, cwd);
 
     // A live wrapper only reflects the appends pi-web itself made. When another
     // pi process (the TUI) writes the same session file, the in-memory index
@@ -181,7 +183,8 @@ export async function PATCH(
     if (typeof name !== "string") {
       return NextResponse.json({ error: "name is required" }, { status: 400 });
     }
-    const filePath = await resolveSessionPath(id);
+    const cwd = new URL(req.url).searchParams.get("cwd") || undefined;
+    const filePath = await resolveSessionPath(id, cwd);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
@@ -199,12 +202,13 @@ export async function PATCH(
 
 // DELETE /api/sessions/[id]
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
   try {
-    const filePath = await resolveSessionPath(id);
+    const cwd = new URL(req.url).searchParams.get("cwd") || undefined;
+    const filePath = await resolveSessionPath(id, cwd);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
@@ -275,15 +279,16 @@ export async function DELETE(
     }
     const deletedPaths = new Map<string, string>([[id, filePath]]);
     for (const deletedId of deletedSessionIds) {
+      if (deletedPaths.has(deletedId)) continue;
       const sessionPath = sessionPaths.get(deletedId);
       if (sessionPath) deletedPaths.set(deletedId, sessionPath);
     }
     for (const deletedId of deletedSessionIds) {
       if (deletedPaths.has(deletedId)) continue;
-      const runtimePath = getRpcSession(deletedId)?.sessionFile;
+      const runtimePath = getRpcSession(deletedId, cwd)?.sessionFile;
       if (runtimePath) deletedPaths.set(deletedId, runtimePath);
       else {
-        const resolvedPath = await resolveSessionPath(deletedId);
+        const resolvedPath = await resolveSessionPath(deletedId, cwd);
         if (resolvedPath) deletedPaths.set(deletedId, resolvedPath);
       }
     }
@@ -343,10 +348,11 @@ export async function DELETE(
     for (const deletedId of [...deletedSessionIds].reverse()) {
       if (deletedId === id) continue;
       try { await abortSubagent(deletedId); } catch { /* idle or completed */ }
-      await getRpcSession(deletedId)?.shutdown();
+      const childPath = deletedPaths.get(deletedId);
+      await (childPath ? getRpcSessionByFile(childPath) : getRpcSession(deletedId, cwd))?.shutdown();
     }
     try { await abortSubagent(id); } catch { /* ordinary session */ }
-    await getRpcSession(id)?.shutdown();
+    await (getRpcSessionByFile(filePath) ?? getRpcSession(id, cwd))?.shutdown();
     for (const [deletedId, deletedPath] of deletedPaths) {
       try {
         unlinkSync(deletedPath);

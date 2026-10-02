@@ -11,6 +11,9 @@ interface Props {
 
 export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) {
   const [workerStatus, setWorkerStatus] = useState<LabWorkerStatus | null>(null);
+  // A lab worker whose daemon is down: transcript is read-only in pi-web,
+  // but the inbox (the lab's own mechanism) still accepts messages.
+  const [deadLab, setDeadLab] = useState<{ role: string; labPath: string } | null>(null);
   const [labName, setLabName] = useState<string>("");
   const [labPath, setLabPath] = useState<string | null>(null);
   const [steerModalOpen, setSteerModalOpen] = useState(false);
@@ -20,13 +23,34 @@ export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) 
   const [actionInProgress, setActionInProgress] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
-  // Check if session is a lab session
+  // Check if session is a lab session. The cwd scopes the lookup: several
+  // labs share one worker session id (`lab-<role>`).
   const checkStatus = useCallback(async () => {
     try {
-      const res = await fetch(`/api/agent/${encodeURIComponent(sessionId)}`);
+      const url = cwd
+        ? `/api/agent/${encodeURIComponent(sessionId)}?cwd=${encodeURIComponent(cwd)}`
+        : `/api/agent/${encodeURIComponent(sessionId)}`;
+      const res = await fetch(url);
+      if (!res.ok) return; // transient transport error: keep last known status
       const json = await res.json();
-      if (json.running && json.labWorker && json.state) {
-        setWorkerStatus({
+      if (!(json.running && json.labWorker && json.state)) {
+        // Not a live worker. A dead-daemon lab worker keeps a read-only
+        // banner (inbox still works); anything else clears the banner.
+        setWorkerStatus(null);
+        if (json.labWorker && json.readOnly && typeof json.role === "string" && typeof json.labPath === "string") {
+          setDeadLab({ role: json.role, labPath: json.labPath });
+          setLabPath(json.labPath);
+          const parts = json.labPath.split("/");
+          setLabName(parts[parts.length - 1] || "Lab");
+        } else {
+          setDeadLab(null);
+          setLabPath(null);
+          setLabName("");
+        }
+        return;
+      }
+      setDeadLab(null);
+      setWorkerStatus({
           role: json.state.role,
           sessionId,
           alive: true,
@@ -42,11 +66,10 @@ export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) 
           const parts = json.state.labPath.split("/");
           setLabName(parts[parts.length - 1] || "Lab");
         }
-      }
     } catch {
       // not a lab worker or error
     }
-  }, [sessionId]);
+  }, [sessionId, cwd]);
 
   useEffect(() => {
     checkStatus();
@@ -54,10 +77,11 @@ export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) 
     return () => clearInterval(interval);
   }, [checkStatus]);
 
-  if (!workerStatus) return null;
+  const activeRole = workerStatus?.role ?? deadLab?.role ?? null;
+  if (!workerStatus && !deadLab) return null;
 
   const handleSteer = async () => {
-    if (!labPath || !steerText.trim()) return;
+    if (!labPath || !activeRole || !steerText.trim()) return;
     setActionInProgress(true);
     try {
       const res = await fetch("/api/lab/action", {
@@ -66,7 +90,7 @@ export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) 
         body: JSON.stringify({
           action: "steer",
           path: labPath,
-          role: workerStatus.role,
+          role: activeRole,
           message: steerText.trim(),
         }),
       });
@@ -86,7 +110,7 @@ export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) 
   };
 
   const handleSend = async () => {
-    if (!labPath || !sendText.trim()) return;
+    if (!labPath || !activeRole || !sendText.trim()) return;
     setActionInProgress(true);
     try {
       const res = await fetch("/api/lab/action", {
@@ -95,7 +119,7 @@ export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) 
         body: JSON.stringify({
           action: "send",
           path: labPath,
-          role: workerStatus.role,
+          role: activeRole,
           message: sendText.trim(),
         }),
       });
@@ -116,6 +140,7 @@ export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) 
 
   return (
     <>
+      {workerStatus ? (
       <div
         style={{
           display: "flex",
@@ -231,6 +256,93 @@ export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) 
           </button>
         </div>
       </div>
+      ) : deadLab ? (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "6px 12px",
+          background: "var(--bg-panel)",
+          borderBottom: "1px solid var(--border)",
+          fontSize: 12,
+          gap: 10,
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", minWidth: 0 }}>
+          <span style={{ fontSize: 14 }}>🧪</span>
+          <span style={{ fontWeight: 700, color: "var(--text)" }}>
+            Lab Worker: <span style={{ textTransform: "capitalize" }}>{deadLab.role}</span>
+          </span>
+          {labName && (
+            <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
+              ({labName})
+            </span>
+          )}
+          <span
+            style={{
+              padding: "2px 8px",
+              borderRadius: 10,
+              fontSize: 11,
+              fontWeight: 600,
+              background: "rgba(239, 68, 68, 0.15)",
+              color: "#ef4444",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: "#ef4444",
+              }}
+            />
+            labd down — read-only
+          </span>
+          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
+            Chat is disabled while the daemon is down. Fork to chat with a copy, or send to inbox.
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button
+            onClick={() => setSendModalOpen(true)}
+            title="Send to worker inbox"
+            style={{
+              background: "var(--bg-hover)",
+              color: "var(--text)",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              padding: "4px 8px",
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            📬 Inbox
+          </button>
+          <button
+            onClick={() => onOpenLabDashboard(labPath || undefined)}
+            title="Open full Lab Dashboard"
+            style={{
+              background: "var(--accent)",
+              color: "var(--accent-contrast)",
+              border: "none",
+              borderRadius: 4,
+              padding: "4px 8px",
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            🧪 Dashboard
+          </button>
+        </div>
+      </div>
+      ) : null}
 
       {feedback && (
         <div
@@ -246,8 +358,8 @@ export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) 
         </div>
       )}
 
-      {/* Steer Modal */}
-      {steerModalOpen && (
+      {/* Steer Modal (live workers only — no steer target when the daemon is down) */}
+      {steerModalOpen && workerStatus && (
         <div
           style={{
             position: "fixed",
@@ -342,7 +454,7 @@ export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) 
             }}
           >
             <div style={{ fontWeight: 700, fontSize: 14 }}>
-              📬 Send Message to {workerStatus.role}'s Inbox
+              📬 Send Message to {activeRole}'s Inbox
             </div>
             <textarea
               value={sendText}

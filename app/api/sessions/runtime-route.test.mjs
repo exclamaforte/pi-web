@@ -126,6 +126,10 @@ test("deleting an unpersisted session shuts down its runtime and invalidates cac
     cacheSessionPath(id, filePath);
     let shutdownCalled = false;
     globalThis.__piSessions.set(id, {
+      isAlive: () => true,
+      sessionId: id,
+      cwd: dir,
+      sessionFile: filePath,
       isRunning: () => false,
       shutdown: async () => {
         shutdownCalled = true;
@@ -162,7 +166,9 @@ test("session listing supports cheap summaries and honors force refresh", () => 
 
 test("session reads use the live SessionManager before requiring a JSONL path", () => {
   for (const source of [detailRoute, contextRoute]) {
-    const liveLookup = source.indexOf("getRpcSession(id)");
+    // The live lookup is cwd-scoped so same-id sessions in other cwds (lab
+    // workers reuse `lab-<role>` per lab) cannot serve the wrong chat.
+    const liveLookup = source.indexOf("getRpcSession(id, cwd)");
     const pathLookup = source.indexOf("resolveSessionPath(id");
     assert.ok(liveLookup >= 0);
     assert.ok(pathLookup > liveLookup);
@@ -179,7 +185,7 @@ test("detail reads probe disk only on force/mount and evict a stale idle wrapper
 });
 
 test("live agent state is available before the session file is persisted", () => {
-  const liveLookup = stateRoute.indexOf("getRpcSession(id)");
+  const liveLookup = stateRoute.indexOf("getRpcSession(id, cwd)");
   const pathLookup = stateRoute.indexOf("resolveSessionPath(id)");
   assert.ok(liveLookup >= 0);
   assert.ok(pathLookup > liveLookup);

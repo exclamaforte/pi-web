@@ -11,6 +11,7 @@ import {
   getCompletionNotificationSuppressedRpcSessionIds,
   getRpcSessionInfos,
   getRunningRpcSessionIds,
+  getRunningRpcSessions,
 } from "@/lib/rpc-manager";
 import { startServerPerf } from "@/lib/perf";
 
@@ -42,6 +43,7 @@ export async function GET(req: Request) {
         sessions,
         sessionListVersion,
         runningSessionIds: getRunningRpcSessionIds(),
+        runningSessions: getRunningRpcSessions(),
         completionNotificationSuppressedSessionIds: getCompletionNotificationSuppressedRpcSessionIds(),
       },
       { headers: { "Cache-Control": "no-store" } },
@@ -51,6 +53,7 @@ export async function GET(req: Request) {
         sessions,
         sessionListVersion,
         runningSessionIds: getRunningRpcSessionIds(),
+        runningSessions: getRunningRpcSessions(),
         completionNotificationSuppressedSessionIds: getCompletionNotificationSuppressedRpcSessionIds(),
       },
       { headers: { "Cache-Control": "no-store" } },

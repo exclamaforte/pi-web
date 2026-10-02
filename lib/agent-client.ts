@@ -25,18 +25,31 @@ export function isPromptRejectedError(error: unknown): error is AgentCommandErro
     && error.accepted === false;
 }
 
-const sessionCwdRegistry = new Map<string, string>();
+// Cwd remembered per session id as a sendAgentCommand fallback for callers
+// that do not pass one explicitly. Two sessions may share one id (lab
+// workers reuse `lab-<role>` per lab): when registrations disagree the entry
+// is marked ambiguous and yields nothing, forcing the caller to supply the
+// cwd instead of silently targeting the wrong lab's session.
+const sessionCwdRegistry = new Map<string, { cwd?: string; ambiguous: boolean }>();
 
 export function registerSessionCwd(sessionId: string, cwd: string | undefined): void {
-  if (cwd) {
-    sessionCwdRegistry.set(sessionId, cwd);
-  } else {
-    sessionCwdRegistry.delete(sessionId);
+  if (!cwd) {
+    const entry = sessionCwdRegistry.get(sessionId);
+    if (entry && !entry.ambiguous) sessionCwdRegistry.delete(sessionId);
+    return;
+  }
+  const entry = sessionCwdRegistry.get(sessionId);
+  if (!entry) {
+    sessionCwdRegistry.set(sessionId, { cwd, ambiguous: false });
+  } else if (!entry.ambiguous && entry.cwd !== cwd) {
+    sessionCwdRegistry.set(sessionId, { cwd: undefined, ambiguous: true });
   }
 }
 
 export function getRegisteredSessionCwd(sessionId: string): string | undefined {
-  return sessionCwdRegistry.get(sessionId);
+  const entry = sessionCwdRegistry.get(sessionId);
+  if (!entry || entry.ambiguous) return undefined;
+  return entry.cwd;
 }
 
 export function clearRegisteredSessionCwds(): void {
@@ -50,7 +63,7 @@ export async function sendAgentCommand<T = unknown>(
 ): Promise<T> {
   const effectiveCwd = cwd
     ?? (typeof command.cwd === "string" ? command.cwd : undefined)
-    ?? sessionCwdRegistry.get(sessionId);
+    ?? getRegisteredSessionCwd(sessionId);
 
   const url = effectiveCwd
     ? `/api/agent/${encodeURIComponent(sessionId)}?cwd=${encodeURIComponent(effectiveCwd)}`

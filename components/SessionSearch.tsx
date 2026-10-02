@@ -6,11 +6,12 @@ import { formatRelativeTime } from "@/lib/i18n/format";
 import type { SessionInfo } from "@/lib/types";
 import type { SessionSearchResponse } from "@/lib/session-search";
 
-export function SessionSearch({ open, query, children, selectedSessionId, onSelectSession }: {
+export function SessionSearch({ open, query, children, selectedSessionId, selectedSessionCwd, onSelectSession }: {
   open: boolean;
   query: string;
   children: ReactNode;
   selectedSessionId: string | null;
+  selectedSessionCwd?: string | null;
   onSelectSession: (session: SessionInfo, entryId?: string, blockIndex?: number) => void;
 }) {
   const { t, locale } = useI18n();
@@ -55,11 +56,13 @@ export function SessionSearch({ open, query, children, selectedSessionId, onSele
       )}
       {response?.results.map(({ session, entryId, blockIndex, before, match, after }) => (
         <button
-          key={session.id}
+          // Session identity is (cwd, id): two labs may share one session id,
+          // and one session may contribute several hits, so key by file + entry.
+          key={`${session.path || `${session.cwd}::${session.id}`}::${entryId ?? ""}::${blockIndex ?? ""}`}
           type="button"
           onClick={() => onSelectSession(session, entryId, blockIndex)}
-          aria-current={session.id === selectedSessionId ? "true" : undefined}
-          className={`block w-full cursor-pointer border-b border-border px-3 py-2 text-left hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-accent ${session.id === selectedSessionId ? "bg-bg-selected" : ""}`}
+          aria-current={session.id === selectedSessionId && (!selectedSessionCwd || session.cwd === selectedSessionCwd) ? "true" : undefined}
+          className={`block w-full cursor-pointer border-b border-border px-3 py-2 text-left hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-accent ${session.id === selectedSessionId && (!selectedSessionCwd || session.cwd === selectedSessionCwd) ? "bg-bg-selected" : ""}`}
         >
           <span className="block truncate text-xs font-medium text-text">{session.name || session.firstMessage}</span>
           <span className="mt-1 flex min-w-0 gap-2 text-[10px] text-text-dim">

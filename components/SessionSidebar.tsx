@@ -107,13 +107,15 @@ function sessionListUrl(summary: boolean, force: boolean): string {
 
 interface Props {
   selectedSessionId: string | null;
+  selectedSessionCwd?: string | null;
   onSelectSession: (session: SessionInfo, isRestore?: boolean, entryId?: string, blockIndex?: number) => void;
   onNewSession?: (sessionId: string, cwd: string) => void;
   initialSessionId?: string | null;
+  initialSessionCwd?: string | null;
   skipInitialProjectSelection?: boolean;
   onInitialRestoreDone?: () => void;
   refreshKey?: number;
-  onSessionDeleted?: (sessionId: string) => void;
+  onSessionDeleted?: (sessionId: string, cwd?: string | null) => void;
   selectedCwd?: string | null;
   onCwdChange?: (
     cwd: string | null,
@@ -382,8 +384,12 @@ function PiWebTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onOpenTerminal, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onSessionsChange }: Props) {
+export function SessionSidebar({ selectedSessionId, selectedSessionCwd, onSelectSession, onNewSession, initialSessionId, initialSessionCwd, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onOpenTerminal, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onSessionsChange }: Props) {
   const { t } = useI18n();
+  // Selection identity is (cwd, id): two labs may render rows with one shared
+  // session id, and only the row in the selected session's cwd is selected.
+  const isSelectedSession = (session: SessionInfo) => session.id === selectedSessionId
+    && (!selectedSessionCwd || !session.cwd || session.cwd === selectedSessionCwd);
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   // Tracked in a ref only: the version is compared against the polled value to
   // decide whether the list needs reloading, and no render reads it.
@@ -424,6 +430,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [changesCollapsed, setChangesCollapsed] = useState(true);
   const [explorerRefreshDone, setExplorerRefreshDone] = useState(false);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
+  // Cwd-qualified running pairs ({ id, cwd }) so two sessions sharing one id
+  // (lab workers reuse `lab-<role>` per lab) light only their own row.
+  const [runningSessions, setRunningSessions] = useState<Array<{ id: string; cwd: string }>>([]);
   const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => loadUnreadSessionIds());
   const previousRunningSessionIdsRef = useRef<Set<string>>(new Set());
   const currentSuppressedCompletionSessionIdsRef = useRef<Set<string>>(new Set());
@@ -475,7 +484,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   });
   const [listViewportH, setListViewportH] = useState(0);
   const [listScrollTop, setListScrollTop] = useState(0);
-  const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null);
+  const [focusedSessionKey, setFocusedSessionKey] = useState<string | null>(null);
   const listScrollRafRef = useRef<number | null>(null);
   const listScrollTopRef = useRef(0);
   const renderedListScrollTopRef = useRef(0);
@@ -516,6 +525,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         sessions: SessionInfo[];
         sessionListVersion: number;
         runningSessionIds?: string[];
+        runningSessions?: Array<{ id: string; cwd: string }>;
         completionNotificationSuppressedSessionIds?: string[];
       };
       if (loadId !== sessionLoadIdRef.current) return;
@@ -528,6 +538,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           data.completionNotificationSuppressedSessionIds ?? [],
         );
         setRunningSessionIds(new Set(data.runningSessionIds ?? []));
+        if (data.runningSessions) setRunningSessions(data.runningSessions);
       }
       // Drop markers for deleted sessions and for subagents, whose completion
       // is intentionally silent even if an older client marked them unread.
@@ -621,6 +632,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         const data = await res.json() as {
           sessionListVersion: number;
           runningSessionIds?: string[];
+          runningSessions?: Array<{ id: string; cwd: string }>;
           completionNotificationSuppressedSessionIds?: string[];
         };
         if (stopped || controller !== current) return;
@@ -629,6 +641,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           data.completionNotificationSuppressedSessionIds ?? [],
         );
         setRunningSessionIds(new Set(data.runningSessionIds ?? []));
+        if (data.runningSessions) setRunningSessions(data.runningSessions);
         if (data.sessionListVersion !== sessionListVersionRef.current) {
           // Reuse the invalidated cache; forcing a scan would change the version again.
           await loadSessions();
@@ -830,10 +843,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     if (allSessions.length === 0 || skipInitialProjectSelection) return;
 
     if (selectedCwd === null) {
-      // If restoring a session, set cwd to match that session
+      // If restoring a session, set cwd to match that session. The cwd
+      // qualifier picks the right file when several sessions share one id
+      // (lab workers reuse `lab-<role>` per lab).
       if (initialSessionId && !restoredRef.current) {
         restoredRef.current = true;
-        const target = allSessions.find((s) => s.id === initialSessionId);
+        const candidates = allSessions.filter((s) => s.id === initialSessionId);
+        const target = (initialSessionCwd
+          ? candidates.find((s) => s.cwd === initialSessionCwd)
+          : undefined) ?? candidates[0];
         if (target) {
           setSelectedCwd(target.cwd);
           onSelectSession(target, true);
@@ -845,7 +863,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       const projects = getRecentProjects(allSessions);
       if (projects.length > 0) setSelectedCwd(projects[0].root);
     }
-  }, [allSessions, selectedCwd, initialSessionId, skipInitialProjectSelection, onSelectSession, onInitialRestoreDone]);
+  }, [allSessions, selectedCwd, initialSessionId, initialSessionCwd, skipInitialProjectSelection, onSelectSession, onInitialRestoreDone]);
 
   // Prefer an exact UI selection while a refetch is in flight. Once the
   // response catches up, the server-resolved path handles Windows case and
@@ -1010,7 +1028,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // works when the prop value won't change — e.g. re-clicking the already
   // open session after manually switching worktrees.
   const handleSelectSessionFromList = useCallback((s: SessionInfo, entryId?: string, blockIndex?: number) => {
-    setAllSessions((current) => current.some((session) => session.id === s.id) ? current : [s, ...current]);
+    setAllSessions((current) => current.some((session) => session.id === s.id && session.cwd === s.cwd) ? current : [s, ...current]);
     if (s.cwd) setSelectedCwd(s.cwd);
     onSelectSession(s, false, entryId, blockIndex);
   }, [onSelectSession]);
@@ -1039,6 +1057,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   // Per-project activity counts (running / unread) for the workspace selector.
   // Uses the same stable server key as the project list and filtering.
+  // Row-level running state: when the server reports cwd-qualified pairs, a
+  // shared session id (lab workers reuse `lab-<role>` per lab) lights only
+  // the row whose cwd matches; otherwise fall back to the bare id set.
+  const isSessionRowRunning = useCallback((session: SessionInfo) => {
+    const pairsForId = runningSessions.filter((running) => running.id === session.id);
+    if (pairsForId.length > 0) return pairsForId.some((running) => running.cwd === session.cwd);
+    return runningSessionIds.has(session.id);
+  }, [runningSessions, runningSessionIds]);
   const projectActivity = useMemo(
     () => getProjectActivity(allSessions, runningSessionIds, unreadSessionIds),
     [allSessions, runningSessionIds, unreadSessionIds],
@@ -1093,8 +1119,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     sessionFamilies.length,
     listScrollTop,
     listViewportH,
-    sessionFamilies.findIndex((family) => family.root.id === focusedSessionId),
-  ), [focusedSessionId, listScrollTop, listViewportH, sessionFamilies]);
+    sessionFamilies.findIndex((family) => (family.root.path || `${family.root.cwd}::${family.root.id}`) === focusedSessionKey),
+  ), [focusedSessionKey, listScrollTop, listViewportH, sessionFamilies]);
 
   return (
     <div
@@ -1778,7 +1804,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           overflow: "hidden",
         }}
       >
-        <SessionSearch open={sessionSearchOpen} query={sessionSearchQuery} selectedSessionId={selectedSessionId} onSelectSession={handleSelectSessionFromList}>
+        <SessionSearch open={sessionSearchOpen} query={sessionSearchQuery} selectedSessionId={selectedSessionId} selectedSessionCwd={selectedSessionCwd} onSelectSession={handleSelectSessionFromList}>
         <div
           ref={listScrollRef}
           onScroll={handleListScroll}
@@ -1821,20 +1847,22 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               // Bubble blur after the input's save handler before unpinning the row.
               return (
                 <div
-                  key={family.root.id}
-                  onFocus={() => setFocusedSessionId(family.root.id)}
-                  onBlur={() => setFocusedSessionId(null)}
+                  // Session identity is (cwd, id): lab workers reuse `lab-<role>`
+                  // per lab, so id-only keys would collide across projects.
+                  key={family.root.path || `${family.root.cwd}::${family.root.id}`}
+                  onFocus={() => setFocusedSessionKey(family.root.path || `${family.root.cwd}::${family.root.id}`)}
+                  onBlur={() => setFocusedSessionKey(null)}
                   style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0 }}
                 >
                   <SessionItem
                     session={displaySession}
-                    isSelected={familySessions.some((session) => session.id === selectedSessionId)}
-                    isRunning={familySessions.some((session) => runningSessionIds.has(session.id))}
+                    isSelected={familySessions.some((session) => isSelectedSession(session))}
+                    isRunning={familySessions.some((session) => isSessionRowRunning(session))}
                     isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))}
                     onClick={() => handleSelectSessionFromList(family.root)}
                     onRenamed={loadSessions}
                     onDeleted={(id) => {
-                      onSessionDeleted?.(id);
+                      onSessionDeleted?.(id, family.root.cwd);
                       loadSessions();
                     }}
                   />
@@ -2186,8 +2214,11 @@ function SessionItem({
     // from the same collapsed displayFirstMessage, so an untouched rename of
     // a skill-invoked session stays a no-op instead of persisting raw XML.)
     if (renameValue === title || name === (session.name ?? "")) return;
+    // The cwd qualifier keeps renames/deletes on the right file when two
+    // sessions share one id (lab workers reuse `lab-<role>` per lab).
+    const sessionQuery = session.cwd ? `?cwd=${encodeURIComponent(session.cwd)}` : "";
     try {
-      await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, {
+      await fetch(`/api/sessions/${encodeURIComponent(session.id)}${sessionQuery}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
@@ -2196,19 +2227,20 @@ function SessionItem({
     } catch {
       // ignore
     }
-  }, [renameValue, session.id, session.name, onRenamed, title]);
+  }, [renameValue, session.id, session.cwd, session.name, onRenamed, title]);
 
   const performDelete = useCallback(async () => {
     if (session.transient) return;
     setConfirmDelete(false);
     setDeleting(true);
+    const sessionQuery = session.cwd ? `?cwd=${encodeURIComponent(session.cwd)}` : "";
     try {
-      await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      await fetch(`/api/sessions/${encodeURIComponent(session.id)}${sessionQuery}`, { method: "DELETE" });
       onDeleted?.(session.id);
     } catch {
       setDeleting(false);
     }
-  }, [session.id, session.transient, onDeleted]);
+  }, [session.id, session.cwd, session.transient, onDeleted]);
 
   const handleDeleteClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();

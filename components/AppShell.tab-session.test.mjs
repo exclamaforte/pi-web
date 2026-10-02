@@ -26,8 +26,11 @@ test("applies tab session memory after mount instead of suppressing hydration", 
 test("writes the session URL when tab memory restores onto an empty address bar", () => {
   assert.match(
     source,
-    /if \(!isRestore \|\| new URLSearchParams\(window\.location\.search\)\.get\("session"\) !== session\.id\) \{\s+router\.replace\(`\?session=\$\{encodeURIComponent\(session\.id\)\}`/,
+    /router\.replace\(sessionUrlOf\(session\), \{ scroll: false \}\)/,
   );
+  // The cwd qualifier disambiguates same-id sessions (lab workers reuse
+  // `lab-<role>` per lab) when the URL already names the session.
+  assert.match(source, /\(session\.cwd && new URLSearchParams\(window\.location\.search\)\.get\("cwd"\) !== session\.cwd\)/);
 });
 
 test("New session is remembered as this tab's selection", () => {

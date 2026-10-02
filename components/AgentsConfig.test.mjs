@@ -23,7 +23,7 @@ test("offers a persisted built-in sub-agent switch with explicit session reload"
   assert.match(source, /fetch\("\/api\/subagents\/settings"/);
   assert.match(source, /JSON\.stringify\(\{ enabled \}\)/);
   assert.match(source, /<ConfigSwitch[\s\S]*?checked=\{builtInEnabled\}[\s\S]*?t\("agents\.builtInTitle"\)/);
-  assert.match(source, /sendAgentCommand\(sessionId, \{ type: "reload" \}\)/);
+  assert.match(source, /sendAgentCommand\(sessionId, \{ type: "reload" \}, cwd\)/);
   assert.match(source, /reloadNeeded && sessionId/);
   assert.match(source, /className="agents-concurrency-control"[\s\S]*?t\("agents\.maxConcurrent"\)/);
   assert.equal((source.match(/className="agents-feature-setting"/g) ?? []).length, 1);

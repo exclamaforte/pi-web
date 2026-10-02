@@ -20,7 +20,7 @@ export async function GET(
 
   try {
     const cwd = url.searchParams.get("cwd") ?? undefined;
-    const rpc = getRpcSession(id);
+    const rpc = getRpcSession(id, cwd);
     const liveRpc = rpc?.isAlive() ? rpc : undefined;
     const filePath = liveRpc ? null : await resolveSessionPath(id, cwd);
     if (!liveRpc && !filePath) {

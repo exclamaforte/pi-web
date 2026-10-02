@@ -1674,18 +1674,97 @@ function getRegistry(): Map<string, AgentSessionWrapper> {
   return globalThis.__piSessions;
 }
 
+function registryKeyFor(sessionId: string, cwd?: string | null): string {
+  if (!cwd) return sessionId;
+  let normalized = cwd;
+  try {
+    normalized = realpathSync(resolve(cwd));
+  } catch {
+    normalized = resolve(cwd);
+  }
+  return `${normalized}::${sessionId}`;
+}
+
+function wrapperRegistryKey(wrapper: AgentSessionWrapper): string {
+  return registryKeyFor(wrapper.sessionId, wrapper.cwd || undefined);
+}
+
+function findRegistryMatch(sessionId: string, cwd?: string): AgentSessionWrapper | undefined {
+  const registry = getRegistry();
+  const isUsable = (wrapper: AgentSessionWrapper): boolean =>
+    typeof wrapper.isAlive === "function" && wrapper.isAlive() && wrapper.sessionId === sessionId;
+  if (cwd) {
+    const exact = registry.get(registryKeyFor(sessionId, cwd));
+    if (exact && isUsable(exact)) return exact;
+    // Fall back to a resolve()-level comparison so callers holding a
+    // non-canonical cwd form (symlink prefix, trailing slash) still hit.
+    try {
+      const target = resolve(cwd);
+      for (const wrapper of registry.values()) {
+        if (!isUsable(wrapper) || !wrapper.cwd) continue;
+        try {
+          if (resolve(wrapper.cwd) === target) return wrapper;
+        } catch {
+          if (wrapper.cwd === cwd) return wrapper;
+        }
+      }
+    } catch {
+      // resolve() only throws on invalid input; the exact lookup already missed.
+    }
+    return undefined;
+  }
+  let match: AgentSessionWrapper | undefined;
+  for (const wrapper of registry.values()) {
+    if (!isUsable(wrapper)) continue;
+    // A bare-id lookup is ambiguous when two cwds share one session id
+    // (lab workers reuse `lab-<role>` per lab). Refuse to guess so callers
+    // fall back to a cwd-scoped disk read instead of another lab's wrapper.
+    if (match) return undefined;
+    match = wrapper;
+  }
+  return match;
+}
+
+function findRegistryEntryByFile(sessionFile: string): AgentSessionWrapper | undefined {
+  for (const wrapper of getRegistry().values()) {
+    if (typeof wrapper.isAlive !== "function" || !wrapper.isAlive() || !wrapper.sessionFile) continue;
+    try {
+      if (resolve(wrapper.sessionFile) === resolve(sessionFile)) return wrapper;
+    } catch {
+      if (wrapper.sessionFile === sessionFile) return wrapper;
+    }
+  }
+  return undefined;
+}
+
+function lockKeyFor(sessionId: string, sessionFile: string, cwd: string | undefined): string {
+  if (sessionFile) {
+    try {
+      return `file:${resolve(sessionFile)}`;
+    } catch {
+      return `file:${sessionFile}`;
+    }
+  }
+  return registryKeyFor(sessionId, cwd ?? null);
+}
+
 function registerRpcWrapper(wrapper: AgentSessionWrapper): void {
   const registry = getRegistry();
-  const sessionId = wrapper.sessionId;
-  if (wrapper.sessionFile) cacheSessionPath(sessionId, wrapper.sessionFile);
-  wrapper.onDestroy(() => registry.delete(sessionId));
-  registry.set(sessionId, wrapper);
+  const key = wrapperRegistryKey(wrapper);
+  if (wrapper.sessionFile) {
+    cacheSessionPath(wrapper.sessionId, wrapper.sessionFile);
+    if (wrapper.cwd) cacheSessionPath(`${wrapper.cwd}:${wrapper.sessionId}`, wrapper.sessionFile);
+  }
+  wrapper.onDestroy(() => {
+    if (registry.get(key) === wrapper) registry.delete(key);
+  });
+  registry.set(key, wrapper);
   wrapper.start();
   if (!wrapper.isChatOnly()) wrapper.beginExtensionBinding();
 }
 
 const SUBAGENT_CONTROLLER = createSubagentController({
-  getSession: (sessionId) => getRegistry().get(sessionId),
+  getSession: (sessionId) => findRegistryMatch(sessionId),
   registerSession: (inner, options) => {
     const wrapper = new AgentSessionWrapper(inner, {
       ...(options?.exactSystemPrompt !== undefined
@@ -1746,16 +1825,11 @@ function trackStartingSession(cwd: string): () => void {
 }
 
 export function getRpcSession(sessionId: string, cwd?: string): AgentSessionWrapper | undefined {
-  const session = getRegistry().get(sessionId);
-  if (!session) return undefined;
-  if (cwd && session.cwd) {
-    try {
-      if (resolve(session.cwd) !== resolve(cwd)) return undefined;
-    } catch {
-      if (session.cwd !== cwd) return undefined;
-    }
-  }
-  return session;
+  return findRegistryMatch(sessionId, cwd);
+}
+
+export function getRpcSessionByFile(sessionFile: string): AgentSessionWrapper | undefined {
+  return findRegistryEntryByFile(sessionFile);
 }
 
 export interface SetRpcSessionToolsResult {
@@ -1774,11 +1848,13 @@ export async function setRpcSessionTools(
   sessionId: string,
   sessionFile: string | undefined,
   requestedToolNames: unknown,
+  cwd?: string,
 ): Promise<SetRpcSessionToolsResult> {
   const toolNames = requestedToolNames === undefined
     ? undefined
     : validateSessionToolSelection(requestedToolNames);
-  const existing = getRpcSession(sessionId);
+  const existing = (sessionFile ? findRegistryEntryByFile(sessionFile) : undefined)
+    ?? getRpcSession(sessionId, cwd);
 
   if (!existing?.isAlive()) {
     if (!sessionFile) throw new Error("Session not found");
@@ -1789,7 +1865,7 @@ export async function setRpcSessionTools(
     if (toolNames === undefined) appendClearedSessionToolSelection(manager);
     else appendSessionToolSelection(manager, toolNames);
     invalidateSessionListCache();
-    const started = await startRpcSession(sessionId, sessionFile, undefined);
+    const started = await startRpcSession(sessionId, sessionFile, cwd);
     return { session: started.session, sessionId: started.realSessionId, recreated: false };
   }
 
@@ -1821,7 +1897,7 @@ export async function setRpcSessionTools(
   await existing.shutdown();
 
   if (persistedFile) {
-    const started = await startRpcSession(sessionId, persistedFile, undefined);
+    const started = await startRpcSession(sessionId, persistedFile, existing.cwd);
     return { session: started.session, sessionId: started.realSessionId, recreated: true };
   }
 
@@ -1931,19 +2007,32 @@ export async function destroyRpcSessionsForCwd(cwd: string): Promise<number> {
   return sessions.length;
 }
 
+export interface RunningRpcSession {
+  id: string;
+  cwd: string;
+}
+
+export function getRunningRpcSessions(): RunningRpcSession[] {
+  const sessions: RunningRpcSession[] = [];
+  for (const session of getRegistry().values()) {
+    if (session.isRunning()) sessions.push({ id: session.sessionId, cwd: session.cwd });
+  }
+  return sessions;
+}
+
 export function getRunningRpcSessionIds(): string[] {
   const ids = new Set<string>();
-  for (const [sessionId, session] of getRegistry()) {
-    if (session.isRunning()) ids.add(session.sessionId || sessionId);
+  for (const session of getRegistry().values()) {
+    if (session.isRunning()) ids.add(session.sessionId);
   }
   return [...ids];
 }
 
 export function getCompletionNotificationSuppressedRpcSessionIds(): string[] {
   const ids = new Set<string>();
-  for (const [sessionId, session] of getRegistry()) {
+  for (const session of getRegistry().values()) {
     if (session.isRunning() && session.hasSuppressedCompletionNotifications()) {
-      ids.add(session.sessionId || sessionId);
+      ids.add(session.sessionId);
     }
   }
   return [...ids];
@@ -1966,17 +2055,29 @@ export async function startRpcSession(
   const requestedToolNames = options.toolNames === undefined
     ? undefined
     : validateSessionToolSelection(options.toolNames);
-  const registry = getRegistry();
   const locks = getLocks();
+  const lockKey = lockKeyFor(sessionId, sessionFile, cwd);
 
-  const existing = registry.get(sessionId);
-  if (existing?.isAlive()) {
-    const isSameFile = !sessionFile || !existing.sessionFile || resolve(existing.sessionFile) === resolve(sessionFile);
-    if (isSameFile) return { session: existing, realSessionId: sessionId };
+  // Prefer an exact file match: two cwds may share one session id (lab
+  // workers reuse `lab-<role>` per lab), so a bare-id hit can be the wrong lab.
+  if (sessionFile) {
+    const byFile = findRegistryEntryByFile(sessionFile);
+    if (byFile) return { session: byFile, realSessionId: sessionId };
+  }
+  const existing = findRegistryMatch(sessionId, cwd);
+  if (existing) {
+    if (!sessionFile || !existing.sessionFile) return { session: existing, realSessionId: sessionId };
+    try {
+      if (resolve(existing.sessionFile) === resolve(sessionFile)) {
+        return { session: existing, realSessionId: sessionId };
+      }
+    } catch {
+      return { session: existing, realSessionId: sessionId };
+    }
     await existing.shutdown();
   }
 
-  const inflight = locks.get(sessionId);
+  const inflight = locks.get(lockKey);
   if (inflight) return inflight;
 
   let sessionManager: SessionManager;
@@ -2167,10 +2268,10 @@ export async function startRpcSession(
 
     return { session: wrapper, realSessionId };
   })().finally(() => {
-    locks.delete(sessionId);
+    if (locks.get(lockKey) === starting) locks.delete(lockKey);
     finishStartingSession();
   });
 
-  locks.set(sessionId, starting);
+  locks.set(lockKey, starting);
   return starting;
 }

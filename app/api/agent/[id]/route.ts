@@ -3,6 +3,27 @@ import { resolveSessionPath, readSessionHeader } from "@/lib/session-reader";
 import { startRpcSession, getRpcSession, setRpcSessionTools } from "@/lib/rpc-manager";
 import { isLabSession, isDaemonAlive, sendLabdIpc, steerLabWorker, sendLabInbox } from "@/lib/lab-service";
 
+// Commands allowed against a lab worker session whose daemon is down: pure
+// reads, run control for an already-admitted run, and fork-family ops which
+// write new files instead of the worker's transcript. Everything else
+// (prompt/steer/follow_up/bash/compact/renames/tool pins/branch moves)
+// appends to a file pi-web doesn't own and is rejected with 409.
+const LAB_READONLY_OK = new Set([
+  "get_state",
+  "get_session_stats",
+  "get_last_assistant_text",
+  "get_tools",
+  "get_commands",
+  "fork",
+  "fork_branch",
+  "clone",
+  "abort",
+  "abort_bash",
+  "abort_compaction",
+  "extension_ui_response",
+  "extension_ui_input",
+]);
+
 // POST /api/agent/[id] - Send a command to an existing session
 export async function POST(
   req: Request,
@@ -27,12 +48,33 @@ export async function POST(
 
     // Fast path: already-running in-process session
     const existing = getRpcSession(id, cwd);
+    // A lab worker transcript owned by a dead daemon is read-only (+forkable).
+    // pi-web must not append turns, renames, tool pins, or compactions to a
+    // session file owned by another source — fork it to chat with a copy.
+    if (isLabSession(id, cwd).isLab) {
+      let labFile: string | null = existing?.sessionFile || null;
+      if (!labFile) labFile = await resolveSessionPath(id, cwd);
+      let labHeader = null;
+      if (labFile) {
+        try { labHeader = readSessionHeader(labFile); } catch { labHeader = null; }
+      }
+      const lab = isLabSession(id, labHeader?.cwd || cwd);
+      if (lab.isLab && lab.labPath && lab.role && !isDaemonAlive(lab.labPath).alive
+        && !LAB_READONLY_OK.has(body.type)) {
+        return NextResponse.json({
+          error: `Session '${id}' belongs to lab worker '${lab.role}' whose daemon is down (${lab.labPath}). ` +
+            `pi-web will not write to its transcript. Fork the session to chat with a copy, or start the lab daemon.`,
+          code: "prompt_rejected",
+          accepted: false,
+        }, { status: 409 });
+      }
+    }
     if (body.type === "set_tools") {
       const filePath = existing?.sessionFile || await resolveSessionPath(id, cwd) || undefined;
       if (!existing?.isAlive() && !filePath) {
         return NextResponse.json({ error: "Session not found" }, { status: 404 });
       }
-      const changed = await setRpcSessionTools(id, filePath, toolNames);
+      const changed = await setRpcSessionTools(id, filePath, toolNames, cwd);
       return NextResponse.json({
         success: true,
         data: { sessionId: changed.sessionId, recreated: changed.recreated },
@@ -84,7 +126,7 @@ export async function POST(
       }
     }
 
-    const { session } = await startRpcSession(id, filePath, undefined, {
+    const { session } = await startRpcSession(id, filePath, cwd, {
       ...(toolNames !== undefined ? { toolNames } : {}),
     });
     const result = await session.send(body);
@@ -118,11 +160,14 @@ export async function GET(
 
     // Check if this is an active lab worker managed externally
     const filePath = await resolveSessionPath(id, cwd);
+    let labCheck: { isLab: boolean; role?: string; labPath?: string } = { isLab: false };
+    let labDaemonDown = false;
     if (filePath) {
       const header = readSessionHeader(filePath);
-      const labCheck = isLabSession(id, header?.cwd || cwd);
+      labCheck = isLabSession(id, header?.cwd || cwd);
       if (labCheck.isLab && labCheck.labPath && labCheck.role) {
         const { alive } = isDaemonAlive(labCheck.labPath);
+        labDaemonDown = !alive;
         if (alive) {
           const ipcRes = await sendLabdIpc(labCheck.labPath, { cmd: "status" }, 1500);
           const worker = ipcRes?.workers?.[labCheck.role];
@@ -145,6 +190,18 @@ export async function GET(
       }
     }
 
+    // A lab worker whose daemon is down is read-only in pi-web: flag it so
+    // the UI can explain why the transcript can't take new turns. A live
+    // daemon with a failed socket query stays unflagged (transient).
+    if (labDaemonDown && labCheck.isLab && labCheck.labPath && labCheck.role) {
+      return NextResponse.json({
+        running: false,
+        labWorker: true,
+        role: labCheck.role,
+        labPath: labCheck.labPath,
+        readOnly: true,
+      });
+    }
     return NextResponse.json({ running: false });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

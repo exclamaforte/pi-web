@@ -448,7 +448,7 @@ export function AgentsConfig({
     setReloading(true);
     setSettingsError(null);
     try {
-      await sendAgentCommand(sessionId, { type: "reload" });
+      await sendAgentCommand(sessionId, { type: "reload" }, cwd);
       setReloadNeeded(false);
       onReloaded?.();
     } catch (cause) {

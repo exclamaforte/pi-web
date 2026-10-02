@@ -78,6 +78,20 @@ function parkedNewSessionDraftKey(cwd: string): string {
   return `parked-new:${cwd}`;
 }
 
+// Session identity is (cwd, id), not id alone: lab workers reuse `lab-<role>`
+// in every lab directory, so the URL, scroll memory, and search jumps must
+// all carry the cwd to avoid opening one lab's chat as another's.
+function sessionUrlOf(session: { id: string; cwd?: string | null }): string {
+  const q = new URLSearchParams();
+  q.set("session", session.id);
+  if (session.cwd) q.set("cwd", session.cwd);
+  return `?${q.toString()}`;
+}
+
+function sessionMemoryKey(sessionId: string, cwd?: string | null): string {
+  return cwd ? `${cwd}::${sessionId}` : sessionId;
+}
+
 export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -130,20 +144,20 @@ export function AppShell() {
     // ChatWindow key or restarting its history load.
     setSelectedSession((current) => {
       if (!current) return current;
-      const refreshed = sessions.find((session) => session.id === current.id);
+      const refreshed = sessions.find((session) => session.id === current.id && session.cwd === current.cwd);
       return refreshed ? mergeCatalogRow(current, refreshed) : current;
     });
   }, []);
   const sessionsWithSelection = useMemo(() => {
     if (!selectedSession) return sessionCatalog;
     return [
-      ...sessionCatalog.filter((session) => session.id !== selectedSession.id),
+      ...sessionCatalog.filter((session) => session.id !== selectedSession.id || session.cwd !== selectedSession.cwd),
       selectedSession,
     ];
   }, [selectedSession, sessionCatalog]);
   const activeSessionFamily = useMemo(
-    () => getSessionFamily(sessionsWithSelection, selectedSession?.id),
-    [selectedSession?.id, sessionsWithSelection],
+    () => getSessionFamily(sessionsWithSelection, selectedSession?.id, selectedSession?.cwd),
+    [selectedSession?.id, selectedSession?.cwd, sessionsWithSelection],
   );
   const hasSubagentSessions = Boolean(activeSessionFamily?.subagents.length);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
@@ -164,11 +178,14 @@ export function AppShell() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [sessionKey, setSessionKey] = useState(0);
   const sessionScrollPositionsRef = useRef(new Map<string, ChatScrollPosition>());
+  // Mirrors the selected session's cwd for scroll-memory keys. Assigned during
+  // render next to activeSessionIdRef; read only from event callbacks.
+  const activeSessionCwdRef = useRef<string | null>(null);
   const handleSessionScrollPositionChange = useCallback((sessionId: string, position: ChatScrollPosition) => {
-    sessionScrollPositionsRef.current.set(sessionId, position);
+    sessionScrollPositionsRef.current.set(sessionMemoryKey(sessionId, activeSessionCwdRef.current), position);
   }, []);
-  const [searchTarget, setSearchTarget] = useState<{ sessionId: string; entryId: string; blockIndex?: number } | null>(null);
-  const handleSearchTargetHandled = useCallback((target: { sessionId: string; entryId: string }) => {
+  const [searchTarget, setSearchTarget] = useState<{ sessionId: string; cwd?: string | null; entryId: string; blockIndex?: number } | null>(null);
+  const handleSearchTargetHandled = useCallback((target: { sessionId: string; cwd?: string | null; entryId: string }) => {
     setSearchTarget((current) => current === target ? null : current);
   }, []);
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
@@ -305,6 +322,7 @@ export function AppShell() {
   const autoNameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeSessionIdRef = useRef<string | null>(selectedSession?.id ?? null);
   activeSessionIdRef.current = selectedSession?.id ?? null;
+  activeSessionCwdRef.current = selectedSession?.cwd ?? null;
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
   }, []);
@@ -561,7 +579,7 @@ export function AppShell() {
         ?? activeProjectKeyRef.current
         ?? workspaceKeyOf(selectedSession);
       setLastOpenSession(projectKey, selectedSession.id);
-      setTabOpenSession(selectedSession.id);
+      setTabOpenSession(selectedSession.id, selectedSession.cwd);
       return;
     }
     if (newSessionCwd) setTabOpenNewSession(newSessionCwd);
@@ -647,10 +665,7 @@ export function AppShell() {
       setSessionKey((k) => k + 1);
       const currentParams = new URLSearchParams(window.location.search);
       if (currentParams.get("session") !== s.id || (s.cwd && currentParams.get("cwd") !== s.cwd)) {
-        const q = new URLSearchParams();
-        q.set("session", s.id);
-        if (s.cwd) q.set("cwd", s.cwd);
-        router.replace(`?${q.toString()}`, { scroll: false });
+        router.replace(sessionUrlOf(s), { scroll: false });
       }
     };
     // Fast path: the sidebar already delivered the catalogue — restore
@@ -741,7 +756,7 @@ export function AppShell() {
   }, [activeCwd, activeFileTabId, invalidateWorkspaceRestore, newSessionCwd, router, selectedSession, restoreWorkspaceContext]);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false, entryId?: string, blockIndex?: number) => {
-    setSearchTarget(entryId ? { sessionId: session.id, entryId, blockIndex } : null);
+    setSearchTarget(entryId ? { sessionId: session.id, cwd: session.cwd, entryId, blockIndex } : null);
     invalidateWorkspaceRestore();
     const activeDraftKey = activeNewSessionDraftKeyRef.current;
     const activeDraftCwd = newSessionCwd ?? (selectedSession === null ? activeCwd : null);
@@ -792,9 +807,11 @@ export function AppShell() {
     // Skip router.replace when the URL already has this session — calling
     // replace in production Next.js triggers a Suspense remount loop.
     // Tab-memory restore lands on `/` and must write `?session=` so reload
-    // and copy-link keep this session.
-    if (!isRestore || new URLSearchParams(window.location.search).get("session") !== session.id) {
-      router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
+    // and copy-link keep this session. The cwd qualifier disambiguates
+    // same-id sessions (lab workers reuse `lab-<role>` per lab).
+    if (!isRestore || new URLSearchParams(window.location.search).get("session") !== session.id
+      || (session.cwd && new URLSearchParams(window.location.search).get("cwd") !== session.cwd)) {
+      router.replace(sessionUrlOf(session), { scroll: false });
     }
   }, [activeCwd, activeFileTabId, invalidateWorkspaceRestore, router, isMobile, newSessionCwd, selectedSession]);
 
@@ -871,8 +888,8 @@ export function AppShell() {
     activeNewSessionDraftKeyRef.current = null;
     setNewSessionCwd(null);
     setSelectedSession(session);
-    hydrateSelectedSession(session.id);
-    router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
+    hydrateSelectedSession(session.id, session.cwd);
+    router.replace(sessionUrlOf(session), { scroll: false });
   }, [invalidateWorkspaceRestore, router, hydrateSelectedSession]);
 
   const deliverSessionNotification = useCallback(({
@@ -889,7 +906,9 @@ export function AppShell() {
     if (!("Notification" in window)) return;
 
     const fire = () => {
-      const sessionUrl = targetSession ? `/?session=${encodeURIComponent(targetSession.id)}` : "/";
+      // Carry the cwd so a notification for a shared session id (lab workers
+      // reuse `lab-<role>` per lab) reopens the right lab's chat.
+      const sessionUrl = targetSession ? `/${sessionUrlOf(targetSession)}` : "/";
       void showBrowserNotification({
         title,
         body,
@@ -918,7 +937,7 @@ export function AppShell() {
   const handleAgentEnd = useCallback(() => {
     setRefreshKey((k) => k + 1);
     setExplorerRefreshKey((k) => k + 1);
-    if (selectedSession) hydrateSelectedSession(selectedSession.id);
+    if (selectedSession) hydrateSelectedSession(selectedSession.id, selectedSession.cwd);
 
     if (selectedSession?.relation?.kind === "subagent") return;
     if (!shouldShowBrowserNotification()) return;
@@ -948,13 +967,17 @@ export function AppShell() {
 
   const handleAutoName = useCallback(async () => {
     const sessionId = selectedSession?.id;
+    const sessionCwd = selectedSession?.cwd;
     if (!sessionId || autoNameStatus.kind === "naming") return;
     if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
     setActiveTopPanel(null);
     setAutoNameStatus({ kind: "naming" });
 
     try {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/auto-name`, {
+      const autoNameUrl = sessionCwd
+        ? `/api/sessions/${encodeURIComponent(sessionId)}/auto-name?cwd=${encodeURIComponent(sessionCwd)}`
+        : `/api/sessions/${encodeURIComponent(sessionId)}/auto-name`;
+      const response = await fetch(autoNameUrl, {
         method: "POST",
       });
       const body = (await response.json().catch(() => ({}))) as { title?: string; error?: string };
@@ -992,24 +1015,28 @@ export function AppShell() {
     setRefreshKey((k) => k + 1);
     setSessionKey((k) => k + 1);
     setNewSessionCwd(null);
+    // The forked session inherits the source session's cwd; capture it for the
+    // cwd-qualified URL so a same-id session in another lab cannot win.
+    const forkCwd = selectedSession?.cwd ?? activeCwd ?? null;
     setSelectedSession((prev) => ({
       ...(prev ?? { path: "", cwd: "", created: "", modified: "", messageCount: 0, firstMessage: "" }),
       id: newSessionId,
       transient: false,
     }));
-    hydrateSelectedSession(newSessionId);
-    router.replace(`?session=${encodeURIComponent(newSessionId)}`, { scroll: false });
-  }, [invalidateWorkspaceRestore, router, hydrateSelectedSession]);
+    hydrateSelectedSession(newSessionId, forkCwd ?? undefined);
+    router.replace(sessionUrlOf({ id: newSessionId, cwd: forkCwd }), { scroll: false });
+  }, [invalidateWorkspaceRestore, router, hydrateSelectedSession, selectedSession?.cwd, activeCwd]);
 
   const handleAskInNewChat = useCallback(async (
     prompt: string,
     sourceSessionId: string,
     sourceEntryId: string,
+    sourceCwd?: string,
   ) => {
     const result = await sendAgentCommand<{ newSessionId?: string }>(sourceSessionId, {
       type: "fork_branch",
       entryId: sourceEntryId,
-    });
+    }, sourceCwd);
     if (!result?.newSessionId) throw new Error(translate("chat.quoteForkFailed"));
     setPendingQuotePrompt({ sessionId: result.newSessionId, text: prompt });
     handleSessionForked(result.newSessionId);
@@ -1019,10 +1046,10 @@ export function AppShell() {
     setInitialSessionRestored(true);
   }, []);
 
-  const handleSessionDeleted = useCallback((sessionId: string) => {
+  const handleSessionDeleted = useCallback((sessionId: string, sessionCwd?: string | null) => {
     invalidateWorkspaceRestore();
     setRefreshKey((k) => k + 1);
-    if (selectedSession?.id === sessionId) {
+    if (selectedSession?.id === sessionId && (!sessionCwd || selectedSession?.cwd === sessionCwd)) {
       clearTabOpenSession(sessionId);
       const cwd = selectedSession.cwd;
       const draftId = typeof crypto.randomUUID === "function"
@@ -1190,9 +1217,11 @@ export function AppShell() {
     <>
       <SessionSidebar
         selectedSessionId={selectedSession?.id ?? null}
+        selectedSessionCwd={selectedSession?.cwd ?? null}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         initialSessionId={initialSessionId}
+        initialSessionCwd={initialNavigation.sessionCwd}
         skipInitialProjectSelection={initialNavigation.requestedCwd !== null}
         onInitialRestoreDone={handleInitialRestoreDone}
         refreshKey={refreshKey}
@@ -2359,9 +2388,9 @@ export function AppShell() {
               key={sessionKey}
               session={selectedSession}
               onOpenLabDashboard={handleOpenLabDashboard}
-              searchTarget={searchTarget?.sessionId === selectedSession?.id ? searchTarget : null}
+              searchTarget={searchTarget && searchTarget.sessionId === selectedSession?.id && (!searchTarget.cwd || searchTarget.cwd === selectedSession?.cwd) ? searchTarget : null}
               onSearchTargetHandled={handleSearchTargetHandled}
-              initialScrollPosition={selectedSession ? sessionScrollPositionsRef.current.get(selectedSession.id) ?? null : null}
+              initialScrollPosition={selectedSession ? sessionScrollPositionsRef.current.get(sessionMemoryKey(selectedSession.id, selectedSession.cwd)) ?? null : null}
               onScrollPositionChange={handleSessionScrollPositionChange}
               sessionRunning={Boolean(selectedSession && runningSessionIds.has(selectedSession.id))}
               newSessionCwd={effectiveNewSessionCwd}

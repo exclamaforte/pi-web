@@ -9,7 +9,7 @@ export async function GET(
   const { id } = await params;
   const cwd = new URL(req.url).searchParams.get("cwd") || undefined;
   try {
-    const rpc = getRpcSession(id);
+    const rpc = getRpcSession(id, cwd);
     if (rpc?.isAlive()) {
       const state = await rpc.send({ type: "get_state" });
       return NextResponse.json({ running: true, state });

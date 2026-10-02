@@ -14,7 +14,7 @@ import type {
 } from "@/lib/types";
 import { isBlockingExtensionUiRequest } from "@/lib/browser-notifications";
 import { normalizeToolCalls } from "@/lib/normalize";
-import { isPromptRejectedError, registerSessionCwd, sendAgentCommand } from "@/lib/agent-client";
+import { isPromptRejectedError, registerSessionCwd, sendAgentCommand as sendAgentCommandImpl } from "@/lib/agent-client";
 import {
   deleteSessionViewSnapshot,
   getSessionViewSnapshot,
@@ -405,6 +405,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const effectiveCwd = session?.cwd || newSessionCwd || undefined;
   const effectiveCwdRef = useRef<string | undefined>(effectiveCwd);
   effectiveCwdRef.current = effectiveCwd;
+
+  // Every agent command from this mount targets this mount's session. Thread
+  // the cwd explicitly: two labs may share one session id (`lab-<role>`),
+  // and the id-keyed fallback registry cannot tell them apart.
+  const sendAgentCommand = useCallback(
+    <T = unknown,>(sid: string, command: Record<string, unknown>): Promise<T> =>
+      sendAgentCommandImpl<T>(sid, command, effectiveCwdRef.current),
+    [],
+  );
 
   useEffect(() => {
     if (session?.id) {

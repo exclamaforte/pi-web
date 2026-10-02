@@ -163,6 +163,9 @@ hooks/
 ### Session files can be fully rewritten
 `parentSession` in the header is **display metadata only** — has zero effect on chat content. Safe to `writeFileSync` the entire file (pi does this itself during migrations). Used when cascade-reparenting children on delete.
 
+### Session identity is (cwd, id) — ids are not globally unique
+Lab workers reuse fixed ids (`lab-pi`, `lab-implementer`, `lab-reviewer`) in every lab directory, so a bare session id can name several different `.jsonl` files. Every lookup must scope by cwd: `getRpcSession(id, cwd)` refuses ambiguous bare-id hits, `resolveSessionPath(id)` returns null for duplicates without a cwd, the registry/locks are keyed `cwd::id`, and URLs/tab memory/scroll positions carry `?cwd=`. Never add a bare-id `Map.get`, React `key={id}`, or `sessions.find(s => s.id === ...)` without a cwd qualifier.
+
 ### ToolCall field normalization
 Pi stores toolCall blocks as `{type:"toolCall", id, name, arguments}` but `ToolCallContent` uses `{toolCallId, toolName, input}`. `normalizeToolCalls()` in `lib/normalize.ts` handles this — called in both `session-reader.ts` (file load) and `handleAgentEvent` in `hooks/useAgentSession.ts` (streaming).
 

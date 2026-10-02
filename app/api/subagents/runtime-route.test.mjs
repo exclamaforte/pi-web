@@ -47,6 +47,7 @@ function installRunningSubagent(t) {
   globalThis.__piSubagentRuns = new Map();
   globalThis.__piSessions = new Map([[id, {
     isAlive: () => true,
+    sessionId: id,
     isRunning: () => running,
     sessionFile: `/tmp/${id}.jsonl`,
     inner: {

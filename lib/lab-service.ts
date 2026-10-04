@@ -306,6 +306,66 @@ export async function getBeadsData(labPath: string): Promise<{
   return { ready, needsReview, returned, needsReproduce };
 }
 
+export interface BeadGraphNode {
+  id: string;
+  title: string;
+  status: string;
+  priority?: number;
+  issue_type?: string;
+  created_at?: string;
+  closed_at?: string;
+  labels?: string[];
+  deps: string[];
+}
+
+/** Dependency graph for the beads-audit views: all beads with dep edges.
+ * Sources `bd list --all --json`; when no item carries dependency edges,
+ * falls back to parsing `bd list --all --format dot` (`"a" -> "b"`). */
+export async function getBeadGraph(labPath: string): Promise<BeadGraphNode[]> {
+  const env = {
+    ...process.env,
+    PATH: `${join(homedir(), ".local", "bin")}:${process.env.PATH || ""}`,
+  };
+  const runBd = async (args: string[]): Promise<string> => {
+    const { stdout } = await execFileAsync("bd", args, {
+      cwd: labPath,
+      timeout: 15000,
+      env,
+    });
+    return stdout;
+  };
+  const stdout = await runBd(["list", "--all", "--json", "--limit", "0"]);
+  const items = JSON.parse(stdout || "[]");
+  if (!Array.isArray(items)) return [];
+  const nodes: BeadGraphNode[] = items.map((it) => ({
+    id: String(it.id),
+    title: String(it.title || ""),
+    status: String(it.status || "open"),
+    priority: typeof it.priority === "number" ? it.priority : undefined,
+    issue_type: it.issue_type ? String(it.issue_type) : undefined,
+    created_at: it.created_at ? String(it.created_at) : undefined,
+    closed_at: it.closed_at ? String(it.closed_at) : undefined,
+    labels: Array.isArray(it.labels) ? it.labels.map(String) : undefined,
+    deps: Array.isArray(it.dependencies)
+      ? it.dependencies.map((d: { depends_on_id: string }) => String(d.depends_on_id))
+      : [],
+  }));
+  if (nodes.length > 0 && nodes.every((n) => n.deps.length === 0)) {
+    // Edge data missing from JSON: fall back to dot output.
+    try {
+      const dot = await runBd(["list", "--all", "--format", "dot"]);
+      const byId = new Map(nodes.map((n) => [n.id, n]));
+      for (const m of dot.matchAll(/"([^"]+)"\s*->\s*"([^"]+)"/g)) {
+        const from = byId.get(m[1]);
+        if (from && byId.has(m[2]) && !from.deps.includes(m[2])) from.deps.push(m[2]);
+      }
+    } catch {
+      // keep the dep-less nodes rather than failing the view
+    }
+  }
+  return nodes;
+}
+
 /** Read GPU queue using gpqueue.py status */
 export async function getGpuQueueStatus(): Promise<{
   available: boolean;

@@ -1,11 +1,28 @@
 import { NextResponse } from "next/server";
-import { commentBead, reviewRequestLab } from "@/lib/lab-service";
+import { commentBead, getBeadGraph, reviewRequestLab } from "@/lib/lab-service";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 const execFileAsync = promisify(execFile);
+
+export async function GET(req: Request) {
+  try {
+    const url = new URL(req.url);
+    const labPath = url.searchParams.get("path");
+    if (!labPath) {
+      return NextResponse.json({ error: "Missing path parameter" }, { status: 400 });
+    }
+    const nodes = await getBeadGraph(labPath);
+    return NextResponse.json({ success: true, data: nodes });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
+  }
+}
 
 export async function POST(req: Request) {
   try {

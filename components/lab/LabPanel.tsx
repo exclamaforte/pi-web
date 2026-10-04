@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import type { LabSummary, LabFullStatus, BeadItem, GpuJob, ExperimentSummary } from "@/lib/lab-service";
+import { BeadsGraph } from "./BeadsGraph";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 interface Props {
@@ -22,6 +23,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("workers");
   const [beadsFilter, setBeadsFilter] = useState<BeadsFilter>("ready");
+  const [beadsView, setBeadsView] = useState<"list" | "graph">("list");
 
   // Modals state
   const [steerModalRole, setSteerModalRole] = useState<string | null>(null);
@@ -857,7 +859,30 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
                 </div>
 
                 {/* Beads Cards List */}
-                {filteredBeads.length === 0 ? (
+                {/* List / Graph view toggle */}
+                <div style={{ display: "flex", gap: 8 }}>
+                  {(["list", "graph"] as const).map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setBeadsView(v)}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: 20,
+                        border: beadsView === v ? "1px solid var(--accent)" : "1px solid var(--border)",
+                        background: beadsView === v ? "var(--accent)" : "var(--bg-panel)",
+                        color: beadsView === v ? "var(--accent-contrast)" : "var(--text)",
+                        fontSize: 12,
+                        fontWeight: beadsView === v ? 600 : 500,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {v === "list" ? "📋 List" : "🕸️ Graph"}
+                    </button>
+                  ))}
+                </div>
+                {beadsView === "graph" && selectedLabPath ? (
+                  <BeadsGraph labPath={selectedLabPath} />
+                ) : filteredBeads.length === 0 ? (
                   <div style={{ padding: 30, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
                     No beads in this category.
                   </div>

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import type { LabSummary, LabFullStatus, BeadItem, GpuJob, ExperimentSummary } from "@/lib/lab-service";
 import { BeadsGraph } from "./BeadsGraph";
+import { BeadsTimeline } from "./BeadsTimeline";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 interface Props {
@@ -23,7 +24,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("workers");
   const [beadsFilter, setBeadsFilter] = useState<BeadsFilter>("ready");
-  const [beadsView, setBeadsView] = useState<"list" | "graph">("list");
+  const [beadsView, setBeadsView] = useState<"list" | "graph" | "timeline">("list");
 
   // Modals state
   const [steerModalRole, setSteerModalRole] = useState<string | null>(null);
@@ -861,7 +862,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
                 {/* Beads Cards List */}
                 {/* List / Graph view toggle */}
                 <div style={{ display: "flex", gap: 8 }}>
-                  {(["list", "graph"] as const).map((v) => (
+                  {(["list", "graph", "timeline"] as const).map((v) => (
                     <button
                       key={v}
                       onClick={() => setBeadsView(v)}
@@ -876,12 +877,14 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
                         cursor: "pointer",
                       }}
                     >
-                      {v === "list" ? "📋 List" : "🕸️ Graph"}
+                      {v === "list" ? "📋 List" : v === "graph" ? "🕸️ Graph" : "⏳ Timeline"}
                     </button>
                   ))}
                 </div>
                 {beadsView === "graph" && selectedLabPath ? (
                   <BeadsGraph labPath={selectedLabPath} />
+                ) : beadsView === "timeline" && selectedLabPath ? (
+                  <BeadsTimeline labPath={selectedLabPath} />
                 ) : filteredBeads.length === 0 ? (
                   <div style={{ padding: 30, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
                     No beads in this category.

@@ -14,13 +14,10 @@ test("renders dependency edges as an SVG with status-colored nodes", () => {
   assert.match(source, /colorForStatus\(n\.status\)/);
 });
 
-test("clicking a node loads full bead text into the sidebar", () => {
+test("clicking a node loads full bead text into the shared sidebar", () => {
   assert.match(source, /onClick=\{\(\) => openBead\(n\.id\)\}/);
   assert.match(source, /action: "show", path: labPath, bdId: id/);
-  assert.match(source, /<aside[^>]*aria-label="Bead detail"/);
-  assert.match(source, /\{detail\.bead\.description &&/);
-  assert.match(source, /\{detail\.bead\.design &&/);
-  assert.match(source, /\{detail\.bead\.acceptance_criteria &&/);
+  assert.match(source, /<BeadDetailPanel bead=\{detail\.bead\}/);
 });
 
 test("shows a status legend for the audit colors", () => {

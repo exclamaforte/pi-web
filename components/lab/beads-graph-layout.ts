@@ -41,6 +41,7 @@ export const STATUS_COLORS: Record<string, StatusColor> = {
   closed: { fill: "rgba(107, 114, 128, 0.14)", stroke: "#6b7280" },
   deferred: { fill: "rgba(168, 85, 247, 0.14)", stroke: "#a855f7" },
   deffered: { fill: "rgba(168, 85, 247, 0.14)", stroke: "#a855f7" },
+  parked: { fill: "rgba(168, 85, 247, 0.14)", stroke: "#a855f7" },
   uncreated: { fill: "rgba(255, 255, 255, 0.02)", stroke: "var(--border)" },
 };
 

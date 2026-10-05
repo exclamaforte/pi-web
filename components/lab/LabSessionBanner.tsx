@@ -58,6 +58,7 @@ export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) 
           busy: json.state.isPromptRunning || json.state.isStreaming,
           pending: json.state.pending || 0,
           held: json.state.held || false,
+          parked: json.state.parked || false,
           restarts: 0,
           model: json.state.model?.id,
         });
@@ -174,11 +175,15 @@ export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) 
               fontWeight: 600,
               background: workerStatus.held
                 ? "rgba(245, 158, 11, 0.15)"
+                : workerStatus.parked
+                ? "rgba(168, 85, 247, 0.15)"
                 : workerStatus.busy
                 ? "rgba(16, 185, 129, 0.15)"
                 : "rgba(59, 130, 246, 0.15)",
               color: workerStatus.held
                 ? "#f59e0b"
+                : workerStatus.parked
+                ? "#a855f7"
                 : workerStatus.busy
                 ? "#10b981"
                 : "#3b82f6",
@@ -192,10 +197,22 @@ export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) 
                 width: 6,
                 height: 6,
                 borderRadius: "50%",
-                background: workerStatus.held ? "#f59e0b" : workerStatus.busy ? "#10b981" : "#3b82f6",
+                background: workerStatus.held
+                  ? "#f59e0b"
+                  : workerStatus.parked
+                  ? "#a855f7"
+                  : workerStatus.busy
+                  ? "#10b981"
+                  : "#3b82f6",
               }}
             />
-            {workerStatus.held ? "Taken Over" : workerStatus.busy ? "Busy" : "Idle"}
+            {workerStatus.held
+              ? "Taken Over"
+              : workerStatus.parked
+              ? "Parked (waiting for job)"
+              : workerStatus.busy
+              ? "Busy"
+              : "Idle"}
           </span>
 
           {workerStatus.model && (

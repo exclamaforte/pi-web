@@ -16,6 +16,7 @@ export interface LabWorkerStatus {
   busy: boolean;
   pending: number;
   held: boolean;
+  parked?: boolean;
   restarts: number;
   model?: string;
   prompt?: string;
@@ -655,6 +656,7 @@ export async function getFullLabStatus(labPath: string): Promise<LabFullStatus> 
       busy: false,
       pending: 0,
       held: false,
+      parked: false,
       restarts: 0,
       model: rConfig.model,
       prompt: rConfig.prompt,
@@ -687,6 +689,7 @@ export async function getFullLabStatus(labPath: string): Promise<LabFullStatus> 
               busy: w.busy ?? false,
               pending: w.pending ?? 0,
               held: w.held ?? false,
+              parked: w.parked ?? false,
               restarts: w.restarts ?? 0,
               model: w.model,
             };
@@ -696,6 +699,7 @@ export async function getFullLabStatus(labPath: string): Promise<LabFullStatus> 
             workers[r].busy = w.busy ?? false;
             workers[r].pending = w.pending ?? 0;
             workers[r].held = w.held ?? false;
+            workers[r].parked = w.parked ?? false;
             workers[r].restarts = w.restarts ?? 0;
             if (w.model) workers[r].model = w.model;
           }

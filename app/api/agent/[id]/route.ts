@@ -182,6 +182,7 @@ export async function GET(
                 role: labCheck.role,
                 labPath: labCheck.labPath,
                 held: worker.held,
+                parked: Boolean(worker.parked),
                 pending: worker.pending,
               },
             });

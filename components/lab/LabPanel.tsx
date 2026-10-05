@@ -650,6 +650,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
                     const isAlive = w.alive;
                     const isBusy = w.busy;
                     const isHeld = w.held;
+                    const isParked = w.parked;
 
                     return (
                       <div
@@ -688,6 +689,8 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
                                 ? "rgba(239, 68, 68, 0.15)"
                                 : isHeld
                                 ? "rgba(245, 158, 11, 0.15)"
+                                : isParked
+                                ? "rgba(168, 85, 247, 0.15)"
                                 : isBusy
                                 ? "rgba(16, 185, 129, 0.15)"
                                 : "rgba(59, 130, 246, 0.15)",
@@ -695,6 +698,8 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
                                 ? "#ef4444"
                                 : isHeld
                                 ? "#f59e0b"
+                                : isParked
+                                ? "#a855f7"
                                 : isBusy
                                 ? "#10b981"
                                 : "#3b82f6",
@@ -709,19 +714,34 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
                                   ? "#ef4444"
                                   : isHeld
                                   ? "#f59e0b"
+                                  : isParked
+                                  ? "#a855f7"
                                   : isBusy
                                   ? "#10b981"
                                   : "#3b82f6",
                               }}
                             />
                             <span>
-                              {!isAlive ? "Dead" : isHeld ? "Taken Over" : isBusy ? "Busy (running)" : "Idle"}
+                              {!isAlive
+                                ? "Dead"
+                                : isHeld
+                                ? "Taken Over"
+                                : isParked
+                                ? "Parked (waiting for job)"
+                                : isBusy
+                                ? "Busy (running)"
+                                : "Idle"}
                             </span>
                           </div>
                         </div>
 
                         {/* Metadata row */}
                         <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", flexWrap: "wrap", gap: 12 }}>
+                          {w.parked && (
+                            <div style={{ color: "#a855f7", fontWeight: 600 }}>
+                              ⏸ Parked: idle waiting for background/GPU job completion
+                            </div>
+                          )}
                           {w.model && (
                             <div>
                               Model: <span style={{ color: "var(--text)", fontWeight: 500 }}>{w.model}</span>

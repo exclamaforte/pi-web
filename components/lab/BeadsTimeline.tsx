@@ -8,6 +8,8 @@ import {
   NODE_H,
   colorForStatus,
   layoutBeadGraph,
+  getEdgeHighlight,
+  EDGE_HIGHLIGHT_COLORS,
 } from "./beads-graph-layout";
 import {
   TIMELINE_SPEEDS,
@@ -77,6 +79,15 @@ export function BeadsTimeline({ labPath }: Props) {
   const events = useMemo(() => (nodes ? buildTimelineEvents(nodes) : []), [nodes]);
   const total = events.length;
   const layout = useMemo(() => (nodes ? layoutBeadGraph(nodes) : null), [nodes]);
+  const sortedEdges = useMemo(() => {
+    if (!layout) return [];
+    if (!selectedId) return layout.edges;
+    return [...layout.edges].sort((a, b) => {
+      const aH = a.toId === selectedId || a.fromId === selectedId ? 1 : 0;
+      const bH = b.toId === selectedId || b.fromId === selectedId ? 1 : 0;
+      return aH - bH;
+    });
+  }, [layout, selectedId]);
 
   const timelineState = useMemo(
     () => (nodes && events.length > 0 ? getTimelineGraphState(nodes, events, revealed) : null),
@@ -320,6 +331,52 @@ export function BeadsTimeline({ labPath }: Props) {
           </div>
         )}
 
+        {selectedId && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              fontSize: 12,
+              background: "var(--bg-panel)",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              padding: "6px 12px",
+              marginBottom: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            <span>
+              Selected: <strong style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>{shortId(selectedId)}</strong>
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#06b6d4", fontWeight: 600 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#06b6d4" }} />
+              Incoming Prereqs ({layout?.edges.filter((e) => e.toId === selectedId).length || 0})
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#a855f7", fontWeight: 600 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#a855f7" }} />
+              Outgoing Dependents ({layout?.edges.filter((e) => e.fromId === selectedId).length || 0})
+            </span>
+            <button
+              onClick={() => {
+                setSelectedId(null);
+                setDetail({ loading: false, bead: null, error: null });
+              }}
+              style={{
+                marginLeft: "auto",
+                background: "none",
+                border: "none",
+                color: "var(--text-muted)",
+                cursor: "pointer",
+                fontSize: 12,
+                textDecoration: "underline",
+              }}
+            >
+              ✕ Clear Selection
+            </button>
+          </div>
+        )}
+
         {/* Live Dynamic Dependency Graph reacting to each tick */}
         {layout && layout.nodes.length > 0 && (
           <div style={{ overflow: "auto", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 4 }}>
@@ -331,12 +388,24 @@ export function BeadsTimeline({ labPath }: Props) {
                 <marker id="timeline-edge-arrow-satisfied" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
                   <path d="M0,0 L8,4 L0,8" fill="none" stroke="var(--accent)" strokeWidth="1.8" />
                 </marker>
+                <marker id="timeline-edge-arrow-incoming" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+                  <path d="M0,0.5 L8,4.5 L0,8.5" fill="#06b6d4" stroke="#06b6d4" strokeWidth="1.5" />
+                </marker>
+                <marker id="timeline-edge-arrow-outgoing" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+                  <path d="M0,0.5 L8,4.5 L0,8.5" fill="#a855f7" stroke="#a855f7" strokeWidth="1.5" />
+                </marker>
+                <marker id="timeline-edge-arrow-dimmed" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8" fill="none" stroke="var(--border)" strokeWidth="1" opacity="0.3" />
+                </marker>
               </defs>
-              {layout.edges.map((e) => {
+              {sortedEdges.map((e) => {
                 const fromState = timelineState?.nodeStates.get(e.fromId);
                 const toState = timelineState?.nodeStates.get(e.toId);
                 const bothCreated = (fromState?.created ?? true) && (toState?.created ?? true);
                 const satisfied = fromState?.completed ?? false;
+
+                const highlight = getEdgeHighlight(e, selectedId);
+                const hasSelection = selectedId !== null;
 
                 let strokeColor = "var(--text-muted)";
                 let strokeWidth = 1.5;
@@ -344,19 +413,39 @@ export function BeadsTimeline({ labPath }: Props) {
                 let opacity = 1;
                 let marker = "url(#timeline-edge-arrow)";
 
-                if (!bothCreated) {
-                  strokeColor = "var(--border)";
-                  strokeDash = "3 3";
-                  opacity = 0.2;
-                } else if (satisfied) {
-                  strokeColor = "var(--accent)";
-                  strokeWidth = 2;
-                  opacity = 0.85;
-                  marker = "url(#timeline-edge-arrow-satisfied)";
+                if (hasSelection) {
+                  if (highlight === "incoming") {
+                    strokeColor = EDGE_HIGHLIGHT_COLORS.incoming.stroke;
+                    strokeWidth = 2.8;
+                    opacity = 1;
+                    marker = "url(#timeline-edge-arrow-incoming)";
+                  } else if (highlight === "outgoing") {
+                    strokeColor = EDGE_HIGHLIGHT_COLORS.outgoing.stroke;
+                    strokeWidth = 2.8;
+                    opacity = 1;
+                    marker = "url(#timeline-edge-arrow-outgoing)";
+                  } else {
+                    strokeColor = EDGE_HIGHLIGHT_COLORS.dimmed.stroke;
+                    strokeWidth = 1;
+                    opacity = EDGE_HIGHLIGHT_COLORS.dimmed.opacity;
+                    marker = "url(#timeline-edge-arrow-dimmed)";
+                  }
                 } else {
-                  strokeColor = "#f59e0b";
-                  strokeDash = "4 2";
-                  opacity = 0.75;
+                  if (!bothCreated) {
+                    strokeColor = "var(--border)";
+                    strokeDash = "3 3";
+                    opacity = 0.2;
+                    marker = "url(#timeline-edge-arrow-dimmed)";
+                  } else if (satisfied) {
+                    strokeColor = "var(--accent)";
+                    strokeWidth = 2;
+                    opacity = 0.85;
+                    marker = "url(#timeline-edge-arrow-satisfied)";
+                  } else {
+                    strokeColor = "#f59e0b";
+                    strokeDash = "4 2";
+                    opacity = 0.75;
+                  }
                 }
 
                 return (
@@ -370,7 +459,7 @@ export function BeadsTimeline({ labPath }: Props) {
                     strokeWidth={strokeWidth}
                     strokeDasharray={strokeDash}
                     opacity={opacity}
-                    markerEnd={bothCreated ? marker : undefined}
+                    markerEnd={marker}
                   />
                 );
               })}
@@ -381,7 +470,29 @@ export function BeadsTimeline({ labPath }: Props) {
                 const isCompleted = nodeState ? nodeState.completed : effStatus === "closed";
                 const isCurrent = nodeState?.isCurrentChange;
                 const c = colorForStatus(effStatus);
-                const selected = n.id === selectedId;
+
+                const isSelected = n.id === selectedId;
+                const isIncomingNeighbor = selectedId !== null && layout.edges.some((e) => e.toId === selectedId && e.fromId === n.id);
+                const isOutgoingNeighbor = selectedId !== null && layout.edges.some((e) => e.fromId === selectedId && e.toId === n.id);
+                const isRelated = isSelected || isIncomingNeighbor || isOutgoingNeighbor;
+
+                const nodeOpacity = selectedId !== null
+                  ? (isRelated ? 1.0 : (!isCreated ? 0.2 : 0.4))
+                  : (!isCreated ? 0.35 : 1.0);
+
+                const strokeColor = isSelected
+                  ? "var(--accent)"
+                  : isIncomingNeighbor
+                  ? "#06b6d4"
+                  : isOutgoingNeighbor
+                  ? "#a855f7"
+                  : isCurrent
+                  ? "#f59e0b"
+                  : isCreated
+                  ? (isCompleted ? "#6b7280" : c.stroke)
+                  : "var(--border)";
+
+                const strokeWidth = isSelected ? 3 : (isIncomingNeighbor || isOutgoingNeighbor || isCurrent ? 2.5 : (isCreated ? 2 : 1));
 
                 return (
                   <g
@@ -392,6 +503,21 @@ export function BeadsTimeline({ labPath }: Props) {
                     aria-label={`Bead ${n.id}`}
                   >
                     <title>{`${n.id}\n${n.title}\nStatus: ${effStatus}${isCurrent ? " (Changed this tick)" : ""}`}</title>
+                    {/* Selected node focus ring */}
+                    {isSelected && (
+                      <rect
+                        x={n.x - 4}
+                        y={n.y - 4}
+                        width={NODE_W + 8}
+                        height={NODE_H + 8}
+                        rx={12}
+                        fill="none"
+                        stroke="var(--accent)"
+                        strokeWidth={2.5}
+                        opacity={0.85}
+                        style={{ filter: "drop-shadow(0 0 6px var(--accent))" }}
+                      />
+                    )}
                     {isCurrent && (
                       <rect
                         x={n.x - 4}
@@ -413,10 +539,10 @@ export function BeadsTimeline({ labPath }: Props) {
                       height={NODE_H}
                       rx={8}
                       fill={isCreated ? (isCompleted ? "rgba(107, 114, 128, 0.16)" : c.fill) : "rgba(255, 255, 255, 0.02)"}
-                      stroke={selected ? "var(--accent)" : isCurrent ? "#f59e0b" : isCreated ? (isCompleted ? "#6b7280" : c.stroke) : "var(--border)"}
-                      strokeWidth={selected || isCurrent ? 3 : isCreated ? 2 : 1}
+                      stroke={strokeColor}
+                      strokeWidth={strokeWidth}
                       strokeDasharray={isCreated ? undefined : "4 3"}
-                      opacity={isCreated ? 1 : 0.35}
+                      opacity={nodeOpacity}
                     />
                     <text
                       x={n.x + 10}
@@ -425,7 +551,7 @@ export function BeadsTimeline({ labPath }: Props) {
                       fontWeight={700}
                       fill="var(--text)"
                       fontFamily="var(--font-mono)"
-                      opacity={isCreated ? 1 : 0.45}
+                      opacity={nodeOpacity}
                     >
                       {shortId(n.id)}
                     </text>
@@ -434,7 +560,7 @@ export function BeadsTimeline({ labPath }: Props) {
                       y={n.y + 34}
                       fontSize={11}
                       fill="var(--text-muted)"
-                      opacity={isCreated ? 1 : 0.45}
+                      opacity={nodeOpacity}
                     >
                       {n.title.length > 20 ? `${n.title.slice(0, 19)}…` : n.title}
                     </text>
@@ -446,6 +572,7 @@ export function BeadsTimeline({ labPath }: Props) {
                         fontSize={10}
                         fontWeight={600}
                         fill={isCompleted ? "#6b7280" : c.stroke}
+                        opacity={nodeOpacity}
                       >
                         {isCompleted ? "✓ closed" : effStatus}
                       </text>

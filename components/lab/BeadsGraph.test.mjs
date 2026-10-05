@@ -10,8 +10,17 @@ test("loads the graph from the new GET list endpoint", () => {
 
 test("renders dependency edges as an SVG with status-colored nodes", () => {
   assert.match(source, /<svg[^>]*aria-label="Beads dependency graph"/);
-  assert.match(source, /markerEnd="url\(#bead-edge-arrow\)"/);
+  assert.match(source, /bead-edge-arrow/);
   assert.match(source, /colorForStatus\(n\.status\)/);
+});
+
+test("highlights incoming and outgoing edges and selected node box on click", () => {
+  assert.match(source, /getEdgeHighlight/);
+  assert.match(source, /EDGE_HIGHLIGHT_COLORS\.incoming/);
+  assert.match(source, /EDGE_HIGHLIGHT_COLORS\.outgoing/);
+  assert.match(source, /drop-shadow\(0 0 6px var\(--accent\)\)/);
+  assert.match(source, /Incoming Prereqs/);
+  assert.match(source, /Outgoing Dependents/);
 });
 
 test("clicking a node loads full bead text into the shared sidebar", () => {

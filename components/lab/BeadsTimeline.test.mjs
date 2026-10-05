@@ -27,3 +27,13 @@ test("clicking a revealed node loads full bead text into the shared sidebar", ()
   assert.match(source, /action: "show", path: labPath, bdId: id/);
   assert.match(source, /<BeadDetailPanel bead=\{detail\.bead\}/);
 });
+
+test("timeline graph highlights incoming and outgoing edges and selected node box on click", () => {
+  assert.match(source, /getEdgeHighlight/);
+  assert.match(source, /EDGE_HIGHLIGHT_COLORS\.incoming/);
+  assert.match(source, /EDGE_HIGHLIGHT_COLORS\.outgoing/);
+  assert.match(source, /drop-shadow\(0 0 6px var\(--accent\)\)/);
+  assert.match(source, /Incoming Prereqs/);
+  assert.match(source, /Outgoing Dependents/);
+});
+

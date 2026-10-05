@@ -54,6 +54,48 @@ export function colorForStatus(status: string): StatusColor {
   return STATUS_COLORS[status] ?? DEFAULT_STATUS_COLOR;
 }
 
+export type EdgeHighlightType = "incoming" | "outgoing" | "none";
+
+export function getEdgeHighlight(
+  edge: { fromId: string; toId: string },
+  selectedId: string | null
+): EdgeHighlightType {
+  if (!selectedId) return "none";
+  if (edge.toId === selectedId) return "incoming";
+  if (edge.fromId === selectedId) return "outgoing";
+  return "none";
+}
+
+export function isNodeRelatedToSelection(
+  nodeId: string,
+  selectedId: string | null,
+  edges: { fromId: string; toId: string }[]
+): boolean {
+  if (!selectedId) return true;
+  if (nodeId === selectedId) return true;
+  return edges.some(
+    (e) =>
+      (e.toId === selectedId && e.fromId === nodeId) ||
+      (e.fromId === selectedId && e.toId === nodeId)
+  );
+}
+
+export const EDGE_HIGHLIGHT_COLORS = {
+  incoming: {
+    stroke: "#06b6d4",
+    marker: "url(#bead-edge-arrow-incoming)",
+  },
+  outgoing: {
+    stroke: "#a855f7",
+    marker: "url(#bead-edge-arrow-outgoing)",
+  },
+  dimmed: {
+    stroke: "var(--border)",
+    marker: "url(#bead-edge-arrow-dimmed)",
+    opacity: 0.15,
+  },
+};
+
 /** Layered layout: a bead's layer is one past the deepest prerequisite it
  * depends on (roots at layer 0), so arrows always flow left to right.
  * A dependency cycle cannot loop the resolver: the in-progress bead

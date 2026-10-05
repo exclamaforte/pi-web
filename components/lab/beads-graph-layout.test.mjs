@@ -6,6 +6,8 @@ import {
   X_STEP,
   colorForStatus,
   layoutBeadGraph,
+  getEdgeHighlight,
+  isNodeRelatedToSelection,
 } from "./beads-graph-layout.ts";
 
 const bead = (id, deps = [], extra = {}) => ({
@@ -65,3 +67,21 @@ test("empty input yields an empty canvas", () => {
   assert.deepEqual(layout.nodes, []);
   assert.deepEqual(layout.edges, []);
 });
+
+test("computes edge incoming and outgoing highlight relative to selected node", () => {
+  const edge = { fromId: "a", toId: "b" };
+  assert.equal(getEdgeHighlight(edge, null), "none");
+  assert.equal(getEdgeHighlight(edge, "b"), "incoming");
+  assert.equal(getEdgeHighlight(edge, "a"), "outgoing");
+  assert.equal(getEdgeHighlight(edge, "c"), "none");
+});
+
+test("determines if a node is related to the selected node via incoming or outgoing edges", () => {
+  const edges = [{ fromId: "a", toId: "b" }, { fromId: "b", toId: "c" }];
+  assert.equal(isNodeRelatedToSelection("a", null, edges), true);
+  assert.equal(isNodeRelatedToSelection("b", "b", edges), true); // self
+  assert.equal(isNodeRelatedToSelection("a", "b", edges), true); // incoming prereq
+  assert.equal(isNodeRelatedToSelection("c", "b", edges), true); // outgoing dependent
+  assert.equal(isNodeRelatedToSelection("d", "b", edges), false); // unrelated
+});
+

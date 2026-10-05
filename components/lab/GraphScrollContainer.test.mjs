@@ -22,11 +22,11 @@ test("hides native bottom scrollbar while preserving scrollability", () => {
   assert.match(source, /-ms-overflow-style|msOverflowStyle: "none"/);
 });
 
-test("provides quick pan buttons for scrolling left and right", () => {
-  assert.match(source, /aria-label="Scroll graph left"/);
-  assert.match(source, /aria-label="Scroll graph right"/);
-  assert.match(source, /scrollByAmount\(-300\)/);
-  assert.match(source, /scrollByAmount\(300\)/);
+test("renders a clean sticky top horizontal scrollbar without extra headers or pan buttons", () => {
+  assert.match(source, /className="lab-graph-top-scrollbar"/);
+  assert.doesNotMatch(source, /Horizontal Scroll/);
+  assert.doesNotMatch(source, /scrollByAmount/);
+  assert.doesNotMatch(source, /aria-label="Scroll graph left"/);
 });
 
 test("detects overflow dynamically and syncs scroll position", () => {

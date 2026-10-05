@@ -39,6 +39,8 @@ export const STATUS_COLORS: Record<string, StatusColor> = {
   in_progress: { fill: "rgba(59, 130, 246, 0.14)", stroke: "#3b82f6" },
   blocked: { fill: "rgba(239, 68, 68, 0.14)", stroke: "#ef4444" },
   closed: { fill: "rgba(107, 114, 128, 0.14)", stroke: "#6b7280" },
+  deferred: { fill: "rgba(168, 85, 247, 0.14)", stroke: "#a855f7" },
+  deffered: { fill: "rgba(168, 85, 247, 0.14)", stroke: "#a855f7" },
   uncreated: { fill: "rgba(255, 255, 255, 0.02)", stroke: "var(--border)" },
 };
 

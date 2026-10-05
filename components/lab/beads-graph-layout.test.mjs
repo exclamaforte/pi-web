@@ -55,6 +55,7 @@ test("colors statuses and falls back for unknown ones", () => {
   assert.equal(colorForStatus("in_progress").stroke, "#3b82f6");
   assert.equal(colorForStatus("blocked").stroke, "#ef4444");
   assert.equal(colorForStatus("closed").stroke, "#6b7280");
+  assert.equal(colorForStatus("deferred").stroke, "#a855f7");
   assert.equal(colorForStatus("something-new").stroke, "#8b5cf6");
 });
 

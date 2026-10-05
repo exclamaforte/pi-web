@@ -32,6 +32,7 @@ const LEGEND = [
   { status: "in_progress", label: "In progress" },
   { status: "blocked", label: "Blocked" },
   { status: "closed", label: "Closed" },
+  { status: "deferred", label: "Deferred" },
 ];
 
 function shortId(id: string): string {
@@ -43,6 +44,11 @@ export function BeadsGraph({ labPath }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailState>({ loading: false, bead: null, error: null });
+
+  // Status filter state
+  const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(
+    () => new Set(LEGEND.map((l) => l.status))
+  );
 
   // Timeline scrubber controls
   const [timelineActive, setTimelineActive] = useState(false);
@@ -81,13 +87,33 @@ export function BeadsGraph({ labPath }: Props) {
     };
   }, [labPath]);
 
-  const layout = useMemo(() => (nodes ? layoutBeadGraph(nodes) : null), [nodes]);
-  const events = useMemo(() => (nodes ? buildTimelineEvents(nodes) : []), [nodes]);
+  const toggleStatus = (status: string) => {
+    setSelectedStatuses((prev) => {
+      const next = new Set(prev);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      return next;
+    });
+  };
+
+  const visibleNodes = useMemo(() => {
+    if (!nodes) return null;
+    return nodes.filter((n) => {
+      const s = n.status.toLowerCase();
+      if (s === "deferred" || s === "deffered") {
+        return selectedStatuses.has("deferred");
+      }
+      return selectedStatuses.has(s);
+    });
+  }, [nodes, selectedStatuses]);
+
+  const layout = useMemo(() => (visibleNodes ? layoutBeadGraph(visibleNodes) : null), [visibleNodes]);
+  const events = useMemo(() => (visibleNodes ? buildTimelineEvents(visibleNodes) : []), [visibleNodes]);
   const total = events.length;
 
   const timelineState = useMemo(
-    () => (nodes && events.length > 0 && timelineActive ? getTimelineGraphState(nodes, events, revealed) : null),
-    [nodes, events, revealed, timelineActive]
+    () => (visibleNodes && events.length > 0 && timelineActive ? getTimelineGraphState(visibleNodes, events, revealed) : null),
+    [visibleNodes, events, revealed, timelineActive]
   );
 
   useEffect(() => {
@@ -142,23 +168,80 @@ export function BeadsGraph({ labPath }: Props) {
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        {/* Legend and Timeline Mode Toggle */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {LEGEND.map((l) => (
-              <span key={l.status} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text-muted)" }}>
-                <span
+        {/* Legend with Status Filter Checkboxes and Timeline Mode Toggle */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginRight: 2 }}>Filter:</span>
+            {LEGEND.map((l) => {
+              const checked = selectedStatuses.has(l.status);
+              const col = colorForStatus(l.status);
+              return (
+                <label
+                  key={l.status}
                   style={{
-                    width: 12,
-                    height: 12,
-                    borderRadius: 3,
-                    background: colorForStatus(l.status).fill,
-                    border: `2px solid ${colorForStatus(l.status).stroke}`,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 12,
+                    color: checked ? "var(--text)" : "var(--text-muted)",
+                    cursor: "pointer",
+                    padding: "3px 8px",
+                    borderRadius: 6,
+                    background: checked ? "var(--bg-panel)" : "transparent",
+                    border: `1px solid ${checked ? "var(--border)" : "transparent"}`,
+                    userSelect: "none",
                   }}
-                />
-                {l.label}
-              </span>
-            ))}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleStatus(l.status)}
+                    style={{ cursor: "pointer", accentColor: "var(--accent)" }}
+                  />
+                  <span
+                    style={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: 3,
+                      background: col.fill,
+                      border: `2px solid ${col.stroke}`,
+                      opacity: checked ? 1 : 0.4,
+                    }}
+                  />
+                  {l.label}
+                </label>
+              );
+            })}
+            <button
+              onClick={() => setSelectedStatuses(new Set(LEGEND.map((l) => l.status)))}
+              title="Show all statuses"
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--accent)",
+                fontSize: 11,
+                cursor: "pointer",
+                padding: "2px 4px",
+                textDecoration: "underline",
+              }}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setSelectedStatuses(new Set())}
+              title="Clear status filter"
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--text-muted)",
+                fontSize: 11,
+                cursor: "pointer",
+                padding: "2px 4px",
+                textDecoration: "underline",
+              }}
+            >
+              None
+            </button>
           </div>
           {total > 0 && (
             <button
@@ -290,7 +373,24 @@ export function BeadsGraph({ labPath }: Props) {
         )}
         {layout && layout.nodes.length === 0 && (
           <div style={{ padding: 30, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
-            No beads in this lab.
+            {nodes && nodes.length > 0
+              ? "No beads match the selected status filters."
+              : "No beads in this lab."}{" "}
+            {nodes && nodes.length > 0 && selectedStatuses.size < LEGEND.length && (
+              <button
+                onClick={() => setSelectedStatuses(new Set(LEGEND.map((l) => l.status)))}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--accent)",
+                  cursor: "pointer",
+                  textDecoration: "underline",
+                  fontSize: 13,
+                }}
+              >
+                Reset filters
+              </button>
+            )}
           </div>
         )}
         {layout && layout.nodes.length > 0 && (

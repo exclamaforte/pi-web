@@ -25,4 +25,12 @@ test("shows a status legend for the audit colors", () => {
   assert.match(source, /status: "in_progress", label: "In progress"/);
   assert.match(source, /status: "blocked", label: "Blocked"/);
   assert.match(source, /status: "closed", label: "Closed"/);
+  assert.match(source, /status: "deferred", label: "Deferred"/);
 });
+
+test("legend includes status filter checkboxes to toggle graph visibility", () => {
+  assert.match(source, /type="checkbox"/);
+  assert.match(source, /selectedStatuses/);
+  assert.match(source, /toggleStatus/);
+});
+

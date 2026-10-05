@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import type { LabSummary, LabFullStatus, BeadItem, GpuJob, ExperimentSummary } from "@/lib/lab-service";
 import { BeadsGraph } from "./BeadsGraph";
 import { BeadsTimeline } from "./BeadsTimeline";
+import { BeadsMemories } from "./BeadsMemories";
+import { BeadsEvents } from "./BeadsEvents";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 interface Props {
@@ -13,7 +15,16 @@ interface Props {
 }
 
 type TabKey = "workers" | "beads" | "gpu" | "experiments" | "logs";
-type BeadsFilter = "ready" | "needsReview" | "needsReproduce" | "returned";
+type BeadsFilter =
+  | "ready"
+  | "inProgress"
+  | "blocked"
+  | "needsReview"
+  | "needsReproduce"
+  | "returned"
+  | "deferred"
+  | "closed"
+  | "all";
 
 export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
   const isMobile = useIsMobile();
@@ -24,7 +35,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("workers");
   const [beadsFilter, setBeadsFilter] = useState<BeadsFilter>("ready");
-  const [beadsView, setBeadsView] = useState<"list" | "graph" | "timeline">("list");
+  const [beadsView, setBeadsView] = useState<"list" | "graph" | "timeline" | "memories" | "events">("list");
 
   // Modals state
   const [steerModalRole, setSteerModalRole] = useState<string | null>(null);
@@ -362,6 +373,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
 
   const filteredBeads = useMemo(() => {
     if (!status?.beads) return [];
+    if (beadsFilter === "all") return status.beads.all || [];
     return status.beads[beadsFilter] || [];
   }, [status, beadsFilter]);
 
@@ -844,166 +856,242 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
             {/* BEADS TAB */}
             {activeTab === "beads" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                {/* Filter Selector */}
-                <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+                {/* View switcher: List, Graph, Timeline, Memories, Events */}
+                <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
                   {[
-                    { key: "ready", label: "🟢 Ready", count: status.beads.readyCount },
-                    { key: "needsReview", label: "🔍 Needs Review", count: status.beads.needsReviewCount },
-                    { key: "needsReproduce", label: "⚠️ Needs Reproduce", count: status.beads.needsReproduceCount },
-                    { key: "returned", label: "🔄 Returned / Rework", count: status.beads.returnedCount },
-                  ].map((filter) => {
-                    const isSelected = beadsFilter === filter.key;
-                    return (
-                      <button
-                        key={filter.key}
-                        onClick={() => setBeadsFilter(filter.key as BeadsFilter)}
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: 20,
-                          border: isSelected ? "1px solid var(--accent)" : "1px solid var(--border)",
-                          background: isSelected ? "var(--accent)" : "var(--bg-panel)",
-                          color: isSelected ? "var(--accent-contrast)" : "var(--text)",
-                          fontSize: 12,
-                          fontWeight: isSelected ? 600 : 500,
-                          cursor: "pointer",
-                          whiteSpace: "nowrap",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                        }}
-                      >
-                        <span>{filter.label}</span>
-                        <span style={{ opacity: 0.8, fontSize: 11 }}>({filter.count})</span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Beads Cards List */}
-                {/* List / Graph view toggle */}
-                <div style={{ display: "flex", gap: 8 }}>
-                  {(["list", "graph", "timeline"] as const).map((v) => (
+                    { key: "list", label: "📋 Backlog" },
+                    { key: "graph", label: "🕸️ Graph" },
+                    { key: "timeline", label: "⏳ Timeline" },
+                    { key: "memories", label: "🧠 Memories" },
+                    { key: "events", label: "📜 Events" },
+                  ].map((v) => (
                     <button
-                      key={v}
-                      onClick={() => setBeadsView(v)}
+                      key={v.key}
+                      onClick={() => setBeadsView(v.key as any)}
                       style={{
                         padding: "6px 12px",
                         borderRadius: 20,
-                        border: beadsView === v ? "1px solid var(--accent)" : "1px solid var(--border)",
-                        background: beadsView === v ? "var(--accent)" : "var(--bg-panel)",
-                        color: beadsView === v ? "var(--accent-contrast)" : "var(--text)",
+                        border: beadsView === v.key ? "1px solid var(--accent)" : "1px solid var(--border)",
+                        background: beadsView === v.key ? "var(--accent)" : "var(--bg-panel)",
+                        color: beadsView === v.key ? "var(--accent-contrast)" : "var(--text)",
                         fontSize: 12,
-                        fontWeight: beadsView === v ? 600 : 500,
+                        fontWeight: beadsView === v.key ? 600 : 500,
                         cursor: "pointer",
+                        whiteSpace: "nowrap",
                       }}
                     >
-                      {v === "list" ? "📋 List" : v === "graph" ? "🕸️ Graph" : "⏳ Timeline"}
+                      {v.label}
                     </button>
                   ))}
                 </div>
-                {beadsView === "graph" && selectedLabPath ? (
+
+                {beadsView === "graph" && selectedLabPath && (
                   <BeadsGraph labPath={selectedLabPath} />
-                ) : beadsView === "timeline" && selectedLabPath ? (
+                )}
+
+                {beadsView === "timeline" && selectedLabPath && (
                   <BeadsTimeline labPath={selectedLabPath} />
-                ) : filteredBeads.length === 0 ? (
-                  <div style={{ padding: 30, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
-                    No beads in this category.
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {filteredBeads.map((bead) => (
-                      <div
-                        key={bead.id}
-                        style={{
-                          background: "var(--bg-panel)",
-                          border: "1px solid var(--border)",
-                          borderRadius: 8,
-                          padding: 14,
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 8,
-                          cursor: "pointer",
-                        }}
-                        onClick={() => setSelectedBead(bead)}
-                      >
-                        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-                          <div>
-                            <span
-                              style={{
-                                fontFamily: "var(--font-mono)",
-                                fontSize: 12,
-                                fontWeight: 700,
-                                color: "var(--accent)",
-                                marginRight: 8,
-                              }}
-                            >
-                              {bead.id}
-                            </span>
-                            <span style={{ fontWeight: 600, fontSize: 14 }}>{bead.title}</span>
-                          </div>
-                          {bead.priority !== undefined && (
-                            <span
-                              style={{
-                                fontSize: 11,
-                                padding: "2px 6px",
-                                borderRadius: 4,
-                                background: "var(--bg-hover)",
-                                color: "var(--text-muted)",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              P{bead.priority}
-                            </span>
-                          )}
-                        </div>
+                )}
 
-                        {/* Labels row */}
-                        {bead.labels && bead.labels.length > 0 && (
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                            {bead.labels.map((lbl) => (
-                              <span
-                                key={lbl}
-                                style={{
-                                  fontSize: 11,
-                                  padding: "2px 6px",
-                                  borderRadius: 4,
-                                  background: lbl === "approved-reproduce" ? "rgba(16, 185, 129, 0.2)" : "var(--bg-selected)",
-                                  color: lbl === "approved-reproduce" ? "#10b981" : "var(--text-muted)",
-                                }}
-                              >
-                                {lbl}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                {beadsView === "memories" && selectedLabPath && (
+                  <BeadsMemories labPath={selectedLabPath} />
+                )}
 
-                        {/* Reproduce Quick Action Button */}
-                        {beadsFilter === "needsReproduce" && (
-                          <div style={{ marginTop: 6 }}>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleApproveReproduce(bead.id);
-                              }}
-                              disabled={actionInProgress}
-                              style={{
-                                background: "#10b981",
-                                color: "#ffffff",
-                                border: "none",
-                                borderRadius: 6,
-                                padding: "6px 12px",
-                                fontSize: 12,
-                                fontWeight: 600,
-                                cursor: "pointer",
-                              }}
-                            >
-                              ⚡ Approve GPU Reproduce
-                            </button>
-                          </div>
-                        )}
+                {beadsView === "events" && selectedLabPath && (
+                  <BeadsEvents labPath={selectedLabPath} />
+                )}
+
+                {beadsView === "list" && (
+                  <>
+                    {/* Status Overview Stats Bar */}
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        overflowX: "auto",
+                        padding: "8px 12px",
+                        background: "var(--bg-panel)",
+                        border: "1px solid var(--border)",
+                        borderRadius: 8,
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span style={{ fontWeight: 600, color: "var(--text)" }}>Database Stats:</span>
+                      <span>Ready: <strong style={{ color: "var(--text)" }}>{status.beads.readyCount}</strong></span>
+                      <span>·</span>
+                      <span>In Progress: <strong style={{ color: "#3b82f6" }}>{status.beads.inProgressCount}</strong></span>
+                      <span>·</span>
+                      <span>Blocked: <strong style={{ color: "#ef4444" }}>{status.beads.blockedCount}</strong></span>
+                      <span>·</span>
+                      <span>Needs Review: <strong style={{ color: "var(--accent)" }}>{status.beads.needsReviewCount}</strong></span>
+                      <span>·</span>
+                      <span>Deferred: <strong style={{ color: "#a855f7" }}>{status.beads.deferredCount}</strong></span>
+                      <span>·</span>
+                      <span>Closed: <strong style={{ color: "#6b7280" }}>{status.beads.closedCount}</strong></span>
+                      <span>·</span>
+                      <span>Total: <strong style={{ color: "var(--text)" }}>{status.beads.totalCount}</strong></span>
+                    </div>
+
+                    {/* Filter Selector */}
+                    <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4 }}>
+                      {[
+                        { key: "ready", label: "🟢 Ready", count: status.beads.readyCount },
+                        { key: "inProgress", label: "🏃 In Progress", count: status.beads.inProgressCount },
+                        { key: "blocked", label: "🚫 Blocked", count: status.beads.blockedCount },
+                        { key: "needsReview", label: "🔍 Needs Review", count: status.beads.needsReviewCount },
+                        { key: "needsReproduce", label: "⚠️ Needs Reproduce", count: status.beads.needsReproduceCount },
+                        { key: "returned", label: "🔄 Returned / Rework", count: status.beads.returnedCount },
+                        { key: "deferred", label: "⏸️ Deferred", count: status.beads.deferredCount },
+                        { key: "closed", label: "✅ Closed", count: status.beads.closedCount },
+                        { key: "all", label: "🌐 All", count: status.beads.totalCount },
+                      ].map((filter) => {
+                        const isSelected = beadsFilter === filter.key;
+                        return (
+                          <button
+                            key={filter.key}
+                            onClick={() => setBeadsFilter(filter.key as BeadsFilter)}
+                            style={{
+                              padding: "5px 10px",
+                              borderRadius: 16,
+                              border: isSelected ? "1px solid var(--accent)" : "1px solid var(--border)",
+                              background: isSelected ? "var(--accent)" : "var(--bg-panel)",
+                              color: isSelected ? "var(--accent-contrast)" : "var(--text)",
+                              fontSize: 11,
+                              fontWeight: isSelected ? 600 : 500,
+                              cursor: "pointer",
+                              whiteSpace: "nowrap",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 5,
+                            }}
+                          >
+                            <span>{filter.label}</span>
+                            <span style={{ opacity: 0.8, fontSize: 10 }}>({filter.count})</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Beads Cards List */}
+                    {filteredBeads.length === 0 ? (
+                      <div style={{ padding: 30, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+                        No beads in this category.
                       </div>
-                    ))}
-                  </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        {filteredBeads.map((bead) => (
+                          <div
+                            key={bead.id}
+                            style={{
+                              background: "var(--bg-panel)",
+                              border: "1px solid var(--border)",
+                              borderRadius: 8,
+                              padding: 14,
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 8,
+                              cursor: "pointer",
+                            }}
+                            onClick={() => setSelectedBead(bead)}
+                          >
+                            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+                              <div>
+                                <span
+                                  style={{
+                                    fontFamily: "var(--font-mono)",
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    color: "var(--accent)",
+                                    marginRight: 8,
+                                  }}
+                                >
+                                  {bead.id}
+                                </span>
+                                <span style={{ fontWeight: 600, fontSize: 14 }}>{bead.title}</span>
+                              </div>
+                              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                {bead.status && (
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      padding: "2px 6px",
+                                      borderRadius: 4,
+                                      background: "var(--bg-hover)",
+                                      color: "var(--text-muted)",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                  >
+                                    {bead.status}
+                                  </span>
+                                )}
+                                {bead.priority !== undefined && (
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      padding: "2px 6px",
+                                      borderRadius: 4,
+                                      background: "var(--bg-hover)",
+                                      color: "var(--text-muted)",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                  >
+                                    P{bead.priority}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Labels row */}
+                            {bead.labels && bead.labels.length > 0 && (
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                                {bead.labels.map((lbl) => (
+                                  <span
+                                    key={lbl}
+                                    style={{
+                                      fontSize: 11,
+                                      padding: "2px 6px",
+                                      borderRadius: 4,
+                                      background: lbl === "approved-reproduce" ? "rgba(16, 185, 129, 0.2)" : "var(--bg-selected)",
+                                      color: lbl === "approved-reproduce" ? "#10b981" : "var(--text-muted)",
+                                    }}
+                                  >
+                                    {lbl}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Reproduce Quick Action Button */}
+                            {beadsFilter === "needsReproduce" && (
+                              <div style={{ marginTop: 6 }}>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleApproveReproduce(bead.id);
+                                  }}
+                                  disabled={actionInProgress}
+                                  style={{
+                                    background: "#10b981",
+                                    color: "#ffffff",
+                                    border: "none",
+                                    borderRadius: 6,
+                                    padding: "6px 12px",
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  ⚡ Approve GPU Reproduce
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}

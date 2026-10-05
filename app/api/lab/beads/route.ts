@@ -1,5 +1,14 @@
 import { NextResponse } from "next/server";
-import { commentBead, getBeadGraph, reviewRequestLab } from "@/lib/lab-service";
+import {
+  commentBead,
+  getBeadEvents,
+  getBeadGraph,
+  getBeadHistory,
+  getBeadMemories,
+  forgetBeadMemory,
+  rememberBead,
+  reviewRequestLab,
+} from "@/lib/lab-service";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { homedir } from "node:os";
@@ -14,6 +23,20 @@ export async function GET(req: Request) {
     if (!labPath) {
       return NextResponse.json({ error: "Missing path parameter" }, { status: 400 });
     }
+
+    const view = url.searchParams.get("view");
+    if (view === "memories") {
+      const search = url.searchParams.get("search") || undefined;
+      const memories = await getBeadMemories(labPath, search);
+      return NextResponse.json({ success: true, data: memories });
+    }
+
+    if (view === "events") {
+      const limit = Number(url.searchParams.get("limit")) || 60;
+      const events = await getBeadEvents(labPath, limit);
+      return NextResponse.json({ success: true, data: events });
+    }
+
     const nodes = await getBeadGraph(labPath);
     return NextResponse.json({ success: true, data: nodes });
   } catch (error) {
@@ -27,15 +50,17 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as {
-      action: "comment" | "approve-reproduce" | "close" | "show";
+      action: "comment" | "approve-reproduce" | "close" | "show" | "remember" | "forget" | "history";
       path: string;
-      bdId: string;
+      bdId?: string;
       message?: string;
+      insight?: string;
+      key?: string;
     };
 
-    const { action, path: labPath, bdId } = body;
-    if (!action || !labPath || !bdId) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    const { action, path: labPath } = body;
+    if (!action || !labPath) {
+      return NextResponse.json({ error: "Missing required fields: action and path" }, { status: 400 });
     }
 
     const env = {
@@ -44,21 +69,54 @@ export async function POST(req: Request) {
     };
 
     switch (action) {
+      case "remember": {
+        if (!body.insight?.trim()) {
+          return NextResponse.json({ error: "Insight is required" }, { status: 400 });
+        }
+        const res = await rememberBead(labPath, body.insight, body.key);
+        return NextResponse.json({ success: res.ok, data: res });
+      }
+
+      case "forget": {
+        if (!body.key?.trim()) {
+          return NextResponse.json({ error: "Key is required" }, { status: 400 });
+        }
+        const res = await forgetBeadMemory(labPath, body.key);
+        return NextResponse.json({ success: res.ok, data: res });
+      }
+
+      case "history": {
+        if (!body.bdId) {
+          return NextResponse.json({ error: "bdId is required" }, { status: 400 });
+        }
+        const history = await getBeadHistory(labPath, body.bdId);
+        return NextResponse.json({ success: true, data: history });
+      }
+
       case "comment": {
+        if (!body.bdId) {
+          return NextResponse.json({ error: "bdId is required" }, { status: 400 });
+        }
         if (!body.message) {
           return NextResponse.json({ error: "Message is required" }, { status: 400 });
         }
-        const res = await commentBead(labPath, bdId, body.message);
+        const res = await commentBead(labPath, body.bdId, body.message);
         return NextResponse.json({ success: res.ok, data: res });
       }
 
       case "approve-reproduce": {
-        const res = await reviewRequestLab(labPath, bdId, true);
+        if (!body.bdId) {
+          return NextResponse.json({ error: "bdId is required" }, { status: 400 });
+        }
+        const res = await reviewRequestLab(labPath, body.bdId, true);
         return NextResponse.json({ success: res.ok, data: res });
       }
 
       case "close": {
-        const { stdout } = await execFileAsync("bd", ["close", bdId], {
+        if (!body.bdId) {
+          return NextResponse.json({ error: "bdId is required" }, { status: 400 });
+        }
+        const { stdout } = await execFileAsync("bd", ["close", body.bdId], {
           cwd: labPath,
           env,
           timeout: 10000,
@@ -67,6 +125,10 @@ export async function POST(req: Request) {
       }
 
       case "show": {
+        if (!body.bdId) {
+          return NextResponse.json({ error: "bdId is required" }, { status: 400 });
+        }
+        const bdId = body.bdId;
         const [showRes, commentsRes] = await Promise.allSettled([
           execFileAsync("bd", ["show", bdId, "--json"], {
             cwd: labPath,
@@ -109,3 +171,4 @@ export async function POST(req: Request) {
     );
   }
 }
+

@@ -98,19 +98,51 @@ export interface LabSummary {
   activeWorkersCount: number;
 }
 
+export interface BeadMemory {
+  key: string;
+  insight: string;
+}
+
+export interface BeadEventRecord {
+  seq: number;
+  ts: string;
+  op: string;
+  issue_id: string;
+  actor?: string;
+  issue?: any;
+  dep?: any;
+  comment?: any;
+}
+
+export interface BeadEventsResult {
+  enabled: boolean;
+  note?: string;
+  records: BeadEventRecord[];
+}
+
 export interface LabFullStatus {
   lab: LabSummary;
   daemon: LabDaemonStatus;
   workers: Record<string, LabWorkerStatus>;
   beads: {
     readyCount: number;
+    inProgressCount: number;
+    blockedCount: number;
     needsReviewCount: number;
     returnedCount: number;
     needsReproduceCount: number;
+    deferredCount: number;
+    closedCount: number;
+    totalCount: number;
     ready: BeadItem[];
+    inProgress: BeadItem[];
+    blocked: BeadItem[];
     needsReview: BeadItem[];
     returned: BeadItem[];
     needsReproduce: BeadItem[];
+    deferred: BeadItem[];
+    closed: BeadItem[];
+    all: BeadItem[];
   };
   gpuQueue: {
     available: boolean;
@@ -295,9 +327,14 @@ export function discoverLabs(additionalPaths: string[] = []): LabSummary[] {
 /** Read beads data using bd command line */
 export async function getBeadsData(labPath: string): Promise<{
   ready: BeadItem[];
+  inProgress: BeadItem[];
+  blocked: BeadItem[];
   needsReview: BeadItem[];
   returned: BeadItem[];
   needsReproduce: BeadItem[];
+  deferred: BeadItem[];
+  closed: BeadItem[];
+  all: BeadItem[];
 }> {
   const env = {
     ...process.env,
@@ -318,14 +355,196 @@ export async function getBeadsData(labPath: string): Promise<{
     }
   };
 
-  const [ready, needsReview, returned, needsReproduce] = await Promise.all([
+  const [ready, inProgress, blocked, needsReview, returned, needsReproduce, deferred, closed] = await Promise.all([
     runBd(["ready", "--json", "--limit", "0"]),
+    runBd(["list", "--json", "--limit", "0", "-s", "in_progress"]),
+    runBd(["list", "--json", "--limit", "0", "-s", "blocked"]),
     runBd(["list", "--json", "--limit", "0", "-l", "needs-review"]),
     runBd(["list", "--json", "--limit", "0", "-l", "needs-rework"]),
     runBd(["list", "--json", "--limit", "0", "-l", "needs-reproduce"]),
+    runBd(["list", "--json", "--limit", "0", "-s", "deferred"]),
+    runBd(["list", "--json", "--limit", "100", "-s", "closed"]),
   ]);
 
-  return { ready, needsReview, returned, needsReproduce };
+  const allMap = new Map<string, BeadItem>();
+  for (const list of [ready, inProgress, blocked, needsReview, returned, needsReproduce, deferred, closed]) {
+    for (const item of list) {
+      if (!allMap.has(item.id)) allMap.set(item.id, item);
+    }
+  }
+  const all = Array.from(allMap.values());
+
+  return { ready, inProgress, blocked, needsReview, returned, needsReproduce, deferred, closed, all };
+}
+
+/** Retrieve stored persistent memories using bd memories */
+export async function getBeadMemories(labPath: string, search?: string): Promise<BeadMemory[]> {
+  const env = {
+    ...process.env,
+    PATH: `${join(homedir(), ".local", "bin")}:${process.env.PATH || ""}`,
+  };
+  try {
+    const args = ["memories", "--json"];
+    if (search && search.trim()) {
+      args.splice(1, 0, search.trim());
+    }
+    const { stdout } = await execFileAsync("bd", args, {
+      cwd: labPath,
+      timeout: 10000,
+      env,
+    });
+    const parsed = JSON.parse(stdout || "{}");
+    const memories: BeadMemory[] = [];
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      for (const [key, val] of Object.entries(parsed)) {
+        if (key === "schema_version" || key.startsWith("_")) continue;
+        if (typeof val === "string") {
+          memories.push({ key, insight: val });
+        }
+      }
+    }
+    return memories.sort((a, b) => a.key.localeCompare(b.key));
+  } catch {
+    // If json fails, try text parsing fallback
+    try {
+      const { stdout } = await execFileAsync("bd", ["memories", ...(search ? [search.trim()] : [])], {
+        cwd: labPath,
+        timeout: 10000,
+        env,
+      });
+      const lines = stdout.split("\n");
+      const memories: BeadMemory[] = [];
+      let currentKey = "";
+      for (const line of lines) {
+        if (line.startsWith("Memories (") || line.startsWith("No memories") || !line.trim()) continue;
+        if (line.startsWith("  ") && !line.startsWith("    ")) {
+          currentKey = line.trim();
+        } else if (line.startsWith("    ") && currentKey) {
+          memories.push({ key: currentKey, insight: line.trim() });
+          currentKey = "";
+        }
+      }
+      return memories;
+    } catch {
+      return [];
+    }
+  }
+}
+
+/** Store a persistent memory using bd remember */
+export async function rememberBead(
+  labPath: string,
+  insight: string,
+  key?: string,
+): Promise<{ ok: boolean; key?: string; error?: string }> {
+  const env = {
+    ...process.env,
+    PATH: `${join(homedir(), ".local", "bin")}:${process.env.PATH || ""}`,
+  };
+  try {
+    const args = ["remember", insight.trim()];
+    if (key && key.trim()) {
+      args.push("--key", key.trim());
+    }
+    const { stdout, stderr } = await execFileAsync("bd", args, {
+      cwd: labPath,
+      timeout: 10000,
+      env,
+    });
+    const match = (stdout + " " + stderr).match(/Remembered\s+\[([^\]]+)\]/i);
+    const assignedKey = match ? match[1] : key || "";
+    return { ok: true, key: assignedKey };
+  } catch (err: any) {
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+/** Remove a persistent memory using bd forget */
+export async function forgetBeadMemory(
+  labPath: string,
+  key: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const env = {
+    ...process.env,
+    PATH: `${join(homedir(), ".local", "bin")}:${process.env.PATH || ""}`,
+  };
+  try {
+    await execFileAsync("bd", ["forget", key.trim()], {
+      cwd: labPath,
+      timeout: 10000,
+      env,
+    });
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+/** Read events journal records using bd events */
+export async function getBeadEvents(
+  labPath: string,
+  limit = 50,
+): Promise<BeadEventsResult> {
+  const env = {
+    ...process.env,
+    PATH: `${join(homedir(), ".local", "bin")}:${process.env.PATH || ""}`,
+  };
+  try {
+    const { stdout, stderr } = await execFileAsync("bd", ["events", "export", "--limit", String(limit)], {
+      cwd: labPath,
+      timeout: 10000,
+      env,
+    });
+    const combined = (stdout + "\n" + stderr).trim();
+    if (combined.includes("the events journal is disabled")) {
+      return {
+        enabled: false,
+        note: "The events journal is disabled for this workspace (enable with 'bd config set events-journal true').",
+        records: [],
+      };
+    }
+    const lines = stdout.split("\n");
+    const records: BeadEventRecord[] = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("note:") || trimmed.startsWith("warning:")) continue;
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === "object" && typeof parsed.seq === "number") {
+          records.push(parsed);
+        }
+      } catch {}
+    }
+    return {
+      enabled: true,
+      records: records.reverse(),
+    };
+  } catch (err: any) {
+    return {
+      enabled: false,
+      note: err.message || String(err),
+      records: [],
+    };
+  }
+}
+
+/** Read full version history for an issue using bd history */
+export async function getBeadHistory(labPath: string, bdId: string): Promise<any[]> {
+  const env = {
+    ...process.env,
+    PATH: `${join(homedir(), ".local", "bin")}:${process.env.PATH || ""}`,
+  };
+  try {
+    const { stdout } = await execFileAsync("bd", ["history", bdId.trim(), "--json"], {
+      cwd: labPath,
+      timeout: 10000,
+      env,
+    });
+    const parsed = JSON.parse(stdout || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface BeadGraphNode {
@@ -742,13 +961,23 @@ export async function getFullLabStatus(labPath: string): Promise<LabFullStatus> 
     workers,
     beads: {
       readyCount: beads.ready.length,
+      inProgressCount: beads.inProgress.length,
+      blockedCount: beads.blocked.length,
       needsReviewCount: beads.needsReview.length,
       returnedCount: beads.returned.length,
       needsReproduceCount: beads.needsReproduce.length,
+      deferredCount: beads.deferred.length,
+      closedCount: beads.closed.length,
+      totalCount: beads.all.length,
       ready: beads.ready,
+      inProgress: beads.inProgress,
+      blocked: beads.blocked,
       needsReview: beads.needsReview,
       returned: beads.returned,
       needsReproduce: beads.needsReproduce,
+      deferred: beads.deferred,
+      closed: beads.closed,
+      all: beads.all,
     },
     gpuQueue,
     inboxes,

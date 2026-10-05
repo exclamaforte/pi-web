@@ -32,6 +32,22 @@ export interface LabDaemonStatus {
   gpuIdleTimeoutSeconds?: number;
 }
 
+export interface BeadComment {
+  id: string;
+  issue_id?: string;
+  author?: string;
+  text: string;
+  created_at?: string;
+}
+
+export interface BeadDependency {
+  issue_id?: string;
+  depends_on_id?: string;
+  type?: string;
+  created_at?: string;
+  created_by?: string;
+}
+
 export interface BeadItem {
   id: string;
   title: string;
@@ -44,9 +60,14 @@ export interface BeadItem {
   labels?: string[];
   created_at?: string;
   updated_at?: string;
+  closed_at?: string;
+  close_reason?: string;
+  started_at?: string;
   dependent_count?: number;
   dependency_count?: number;
   comment_count?: number;
+  dependencies?: (string | BeadDependency)[];
+  comments?: BeadComment[];
 }
 
 export interface GpuJob {

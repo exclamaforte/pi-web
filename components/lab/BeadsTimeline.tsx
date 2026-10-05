@@ -3,8 +3,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { BeadGraphNode, BeadItem } from "@/lib/lab-service";
-import { colorForStatus } from "./beads-graph-layout";
-import { TIMELINE_SPEEDS, orderBeadsForTimeline, timelineDateLabel } from "./beads-timeline";
+import {
+  NODE_W,
+  NODE_H,
+  colorForStatus,
+  layoutBeadGraph,
+} from "./beads-graph-layout";
+import {
+  TIMELINE_SPEEDS,
+  buildTimelineEvents,
+  formatEventTime,
+  getTimelineGraphState,
+  orderBeadsForTimeline,
+  timelineDateLabel,
+} from "./beads-timeline";
 import { BeadDetailPanel } from "./BeadDetailPanel";
 
 interface Props {
@@ -15,6 +27,10 @@ interface DetailState {
   loading: boolean;
   bead: BeadItem | null;
   error: string | null;
+}
+
+function shortId(id: string): string {
+  return id.length > 22 ? `${id.slice(0, 10)}…${id.slice(-10)}` : id;
 }
 
 export function BeadsTimeline({ labPath }: Props) {
@@ -39,8 +55,14 @@ export function BeadsTimeline({ labPath }: Props) {
       .then(async (res) => {
         const json = await res.json();
         if (!cancelled) {
-          if (json.success && Array.isArray(json.data)) setNodes(json.data);
-          else setError(json.error || "Failed to load beads timeline");
+          if (json.success && Array.isArray(json.data)) {
+            setNodes(json.data);
+            const events = buildTimelineEvents(json.data);
+            // Default revealed to the end so user sees full graph initially, can scrub back
+            setRevealed(events.length);
+          } else {
+            setError(json.error || "Failed to load beads timeline");
+          }
         }
       })
       .catch((e) => {
@@ -52,14 +74,21 @@ export function BeadsTimeline({ labPath }: Props) {
   }, [labPath]);
 
   const ordered = useMemo(() => (nodes ? orderBeadsForTimeline(nodes) : null), [nodes]);
-  const total = ordered?.length ?? 0;
+  const events = useMemo(() => (nodes ? buildTimelineEvents(nodes) : []), [nodes]);
+  const total = events.length;
+  const layout = useMemo(() => (nodes ? layoutBeadGraph(nodes) : null), [nodes]);
+
+  const timelineState = useMemo(
+    () => (nodes && events.length > 0 ? getTimelineGraphState(nodes, events, revealed) : null),
+    [nodes, events, revealed]
+  );
 
   useEffect(() => {
     if (timer.current) {
       clearInterval(timer.current);
       timer.current = null;
     }
-    if (playing && ordered && revealed < total) {
+    if (playing && total > 0 && revealed < total) {
       timer.current = setInterval(() => {
         setRevealed((r) => {
           if (r + 1 >= total) {
@@ -76,7 +105,7 @@ export function BeadsTimeline({ labPath }: Props) {
         timer.current = null;
       }
     };
-  }, [playing, speed, ordered, revealed, total]);
+  }, [playing, speed, total, revealed]);
 
   const step = (delta: number) => {
     setPlaying(false);
@@ -100,9 +129,12 @@ export function BeadsTimeline({ labPath }: Props) {
     }
   };
 
+  const currentEvent = timelineState?.currentEvent;
+
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
       <div style={{ flex: 1, minWidth: 0 }}>
+        {/* Playback Controls & Scrubber */}
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
           <button onClick={() => { setPlaying(false); setRevealed(0); }} title="Restart" style={btn}>
             ⏮
@@ -113,17 +145,20 @@ export function BeadsTimeline({ labPath }: Props) {
           <button
             onClick={() => (revealed >= total ? (setRevealed(0), setPlaying(true)) : setPlaying((p) => !p))}
             title={playing ? "Pause" : "Play"}
-            style={btn}
+            style={{ ...btn, background: playing ? "var(--accent)" : "var(--bg-panel)", color: playing ? "var(--accent-contrast)" : "var(--text)" }}
           >
             {playing ? "⏸" : "▶"}
           </button>
           <button onClick={() => step(1)} disabled={revealed >= total} title="Step forward" style={btn}>
             ▶|
           </button>
+          <button onClick={() => { setPlaying(false); setRevealed(total); }} title="Jump to latest" style={btn}>
+            ⏭
+          </button>
           <select
             value={speed}
             onChange={(e) => setSpeed(Number(e.target.value))}
-            title="Playback speed (beads/sec)"
+            title="Playback speed (events/sec)"
             style={{ ...btn, padding: "6px 8px" }}
           >
             {TIMELINE_SPEEDS.map((s) => (
@@ -142,12 +177,71 @@ export function BeadsTimeline({ labPath }: Props) {
               setPlaying(false);
               setRevealed(Number(e.target.value));
             }}
-            style={{ flex: 1, minWidth: 120 }}
+            style={{ flex: 1, minWidth: 120, accentColor: "var(--accent)" }}
           />
-          <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+          <span style={{ fontSize: 12, color: "var(--text)", fontFamily: "var(--font-mono)", fontWeight: 600 }}>
             {revealed} / {total}
           </span>
         </div>
+
+        {/* Live Event Banner & Counts */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 10,
+            background: "var(--bg-panel)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: "8px 12px",
+            marginBottom: 10,
+            fontSize: 12,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+            {revealed === 0 ? (
+              <span style={{ color: "var(--text-muted)" }}>
+                ⏮ Timeline start · No beads created yet · Press ▶ to play or drag slider
+              </span>
+            ) : currentEvent ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span
+                  style={{
+                    padding: "2px 8px",
+                    borderRadius: 4,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    background: currentEvent.type === "created" ? "rgba(16, 185, 129, 0.2)" : "rgba(107, 114, 128, 0.25)",
+                    color: currentEvent.type === "created" ? "#10b981" : "var(--text)",
+                    border: `1px solid ${currentEvent.type === "created" ? "#10b981" : "#6b7280"}`,
+                  }}
+                >
+                  {currentEvent.type === "created" ? "🟢 Created" : "🏁 Completed"}
+                </span>
+                <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, color: "var(--text)" }}>
+                  {shortId(currentEvent.beadId)}
+                </span>
+                <span style={{ color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {currentEvent.title}
+                </span>
+                <span style={{ color: "var(--text-muted)", fontSize: 11, marginLeft: "auto" }}>
+                  {formatEventTime(currentEvent.timestamp)}
+                </span>
+              </div>
+            ) : null}
+          </div>
+          {timelineState && (
+            <div style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 12, fontFamily: "var(--font-mono)" }}>
+              <span style={{ color: "#10b981" }}>Created: {timelineState.createdCount}/{timelineState.totalBeads}</span>
+              <span style={{ color: "#6b7280" }}>Completed: {timelineState.completedCount}/{timelineState.totalBeads}</span>
+              <span style={{ color: "#3b82f6" }}>Active: {timelineState.activeCount}</span>
+            </div>
+          )}
+        </div>
+
         {error && (
           <div style={{ padding: 16, color: "#ef4444", fontSize: 13 }}>Timeline failed: {error}</div>
         )}
@@ -156,58 +250,65 @@ export function BeadsTimeline({ labPath }: Props) {
             Loading project history…
           </div>
         )}
+
+        {/* Horizontal Sequence Ribbon */}
         {ordered && (
-          <div style={{ overflowX: "auto", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: "14px 16px" }}>
+          <div style={{ overflowX: "auto", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "flex-start", minWidth: "max-content" }}>
               {ordered.map((n, i) => {
+                const nodeState = timelineState?.nodeStates.get(n.id);
+                const isCreated = nodeState ? nodeState.created : false;
+                const isCompleted = nodeState ? nodeState.completed : false;
                 const isRevealed = i < revealed;
                 const c = colorForStatus(n.status);
                 const selected = n.id === selectedId;
+                const isCurrent = nodeState?.isCurrentChange;
                 return (
                   <div key={n.id} style={{ display: "flex", alignItems: "flex-start" }}>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 120 }}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 110 }}>
                       <button
                         onClick={() => isRevealed && openBead(n.id)}
                         disabled={!isRevealed}
-                        title={isRevealed ? `${n.id}\n${n.title}` : "Not yet revealed — play or step forward"}
+                        title={isRevealed ? `${n.id}\n${n.title}\nStatus: ${nodeState?.effectiveStatus || n.status}` : "Not yet created at this tick"}
                         aria-label={`Bead ${n.id}`}
                         style={{
                           width: 22,
                           height: 22,
                           borderRadius: "50%",
-                          border: `3px solid ${isRevealed ? (selected ? "var(--accent)" : c.stroke) : "var(--border)"}`,
-                          background: isRevealed ? c.fill : "transparent",
-                          opacity: isRevealed ? 1 : 0.45,
+                          border: `3px solid ${isCreated ? (selected || isCurrent ? "var(--accent)" : isCompleted ? "#6b7280" : c.stroke) : "var(--border)"}`,
+                          background: isCreated ? (isCompleted ? "rgba(107, 114, 128, 0.3)" : c.fill) : "transparent",
+                          opacity: isCreated ? 1 : 0.45,
                           cursor: isRevealed ? "pointer" : "default",
                           padding: 0,
+                          boxShadow: isCurrent ? "0 0 0 3px rgba(245, 158, 11, 0.4)" : "none",
                         }}
                       />
                       <div
                         style={{
-                          marginTop: 6,
-                          fontSize: 11,
+                          marginTop: 5,
+                          fontSize: 10,
                           fontFamily: "var(--font-mono)",
                           fontWeight: 700,
-                          color: isRevealed ? "var(--text)" : "var(--text-muted)",
-                          opacity: isRevealed ? 1 : 0.45,
+                          color: isCreated ? "var(--text)" : "var(--text-muted)",
+                          opacity: isCreated ? 1 : 0.45,
                           textAlign: "center",
                           wordBreak: "break-all",
                         }}
                       >
-                        {n.id.replace("pi-research-lab-", "")}
+                        {shortId(n.id)}
                       </div>
-                      <div style={{ fontSize: 10, color: "var(--text-muted)", opacity: isRevealed ? 1 : 0.45 }}>
-                        {timelineDateLabel(n.created_at)}
+                      <div style={{ fontSize: 9, color: "var(--text-muted)", opacity: isCreated ? 1 : 0.45 }}>
+                        {isCompleted ? "✓ closed" : timelineDateLabel(n.created_at)}
                       </div>
                     </div>
                     {i < ordered.length - 1 && (
                       <div
                         style={{
-                          width: 24,
+                          width: 18,
                           height: 3,
                           marginTop: 10,
-                          background: i + 1 < revealed ? "var(--accent)" : "var(--border)",
-                          opacity: i + 1 < revealed ? 1 : 0.5,
+                          background: isCreated ? "var(--accent)" : "var(--border)",
+                          opacity: isCreated ? 1 : 0.4,
                           borderRadius: 2,
                         }}
                       />
@@ -216,6 +317,143 @@ export function BeadsTimeline({ labPath }: Props) {
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {/* Live Dynamic Dependency Graph reacting to each tick */}
+        {layout && layout.nodes.length > 0 && (
+          <div style={{ overflow: "auto", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 4 }}>
+            <svg width={layout.width} height={layout.height} role="img" aria-label="Beads dependency graph">
+              <defs>
+                <marker id="timeline-edge-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8" fill="none" stroke="var(--text-muted)" strokeWidth="1.5" />
+                </marker>
+                <marker id="timeline-edge-arrow-satisfied" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8" fill="none" stroke="var(--accent)" strokeWidth="1.8" />
+                </marker>
+              </defs>
+              {layout.edges.map((e) => {
+                const fromState = timelineState?.nodeStates.get(e.fromId);
+                const toState = timelineState?.nodeStates.get(e.toId);
+                const bothCreated = (fromState?.created ?? true) && (toState?.created ?? true);
+                const satisfied = fromState?.completed ?? false;
+
+                let strokeColor = "var(--text-muted)";
+                let strokeWidth = 1.5;
+                let strokeDash = undefined;
+                let opacity = 1;
+                let marker = "url(#timeline-edge-arrow)";
+
+                if (!bothCreated) {
+                  strokeColor = "var(--border)";
+                  strokeDash = "3 3";
+                  opacity = 0.2;
+                } else if (satisfied) {
+                  strokeColor = "var(--accent)";
+                  strokeWidth = 2;
+                  opacity = 0.85;
+                  marker = "url(#timeline-edge-arrow-satisfied)";
+                } else {
+                  strokeColor = "#f59e0b";
+                  strokeDash = "4 2";
+                  opacity = 0.75;
+                }
+
+                return (
+                  <line
+                    key={`${e.fromId}->${e.toId}`}
+                    x1={e.x1}
+                    y1={e.y1}
+                    x2={e.x2 - 3}
+                    y2={e.y2}
+                    stroke={strokeColor}
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={strokeDash}
+                    opacity={opacity}
+                    markerEnd={bothCreated ? marker : undefined}
+                  />
+                );
+              })}
+              {layout.nodes.map((n) => {
+                const nodeState = timelineState?.nodeStates.get(n.id);
+                const effStatus = nodeState?.effectiveStatus || n.status;
+                const isCreated = nodeState ? nodeState.created : true;
+                const isCompleted = nodeState ? nodeState.completed : effStatus === "closed";
+                const isCurrent = nodeState?.isCurrentChange;
+                const c = colorForStatus(effStatus);
+                const selected = n.id === selectedId;
+
+                return (
+                  <g
+                    key={n.id}
+                    onClick={() => openBead(n.id)}
+                    style={{ cursor: "pointer" }}
+                    role="button"
+                    aria-label={`Bead ${n.id}`}
+                  >
+                    <title>{`${n.id}\n${n.title}\nStatus: ${effStatus}${isCurrent ? " (Changed this tick)" : ""}`}</title>
+                    {isCurrent && (
+                      <rect
+                        x={n.x - 4}
+                        y={n.y - 4}
+                        width={NODE_W + 8}
+                        height={NODE_H + 8}
+                        rx={12}
+                        fill="none"
+                        stroke="#f59e0b"
+                        strokeWidth={2}
+                        strokeDasharray="4 2"
+                        opacity={0.8}
+                      />
+                    )}
+                    <rect
+                      x={n.x}
+                      y={n.y}
+                      width={NODE_W}
+                      height={NODE_H}
+                      rx={8}
+                      fill={isCreated ? (isCompleted ? "rgba(107, 114, 128, 0.16)" : c.fill) : "rgba(255, 255, 255, 0.02)"}
+                      stroke={selected ? "var(--accent)" : isCurrent ? "#f59e0b" : isCreated ? (isCompleted ? "#6b7280" : c.stroke) : "var(--border)"}
+                      strokeWidth={selected || isCurrent ? 3 : isCreated ? 2 : 1}
+                      strokeDasharray={isCreated ? undefined : "4 3"}
+                      opacity={isCreated ? 1 : 0.35}
+                    />
+                    <text
+                      x={n.x + 10}
+                      y={n.y + 18}
+                      fontSize={11}
+                      fontWeight={700}
+                      fill="var(--text)"
+                      fontFamily="var(--font-mono)"
+                      opacity={isCreated ? 1 : 0.45}
+                    >
+                      {shortId(n.id)}
+                    </text>
+                    <text
+                      x={n.x + 10}
+                      y={n.y + 34}
+                      fontSize={11}
+                      fill="var(--text-muted)"
+                      opacity={isCreated ? 1 : 0.45}
+                    >
+                      {n.title.length > 20 ? `${n.title.slice(0, 19)}…` : n.title}
+                    </text>
+                    {isCreated && (
+                      <text
+                        x={n.x + NODE_W - 10}
+                        y={n.y + 18}
+                        textAnchor="end"
+                        fontSize={10}
+                        fontWeight={600}
+                        fill={isCompleted ? "#6b7280" : c.stroke}
+                      >
+                        {isCompleted ? "✓ closed" : effStatus}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </svg>
           </div>
         )}
       </div>

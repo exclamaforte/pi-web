@@ -67,13 +67,36 @@ export async function POST(req: Request) {
       }
 
       case "show": {
-        const { stdout } = await execFileAsync("bd", ["show", bdId, "--json"], {
-          cwd: labPath,
-          env,
-          timeout: 10000,
-        });
-        const parsed = JSON.parse(stdout || "[]");
-        return NextResponse.json({ success: true, data: Array.isArray(parsed) ? parsed[0] : parsed });
+        const [showRes, commentsRes] = await Promise.allSettled([
+          execFileAsync("bd", ["show", bdId, "--json"], {
+            cwd: labPath,
+            env,
+            timeout: 10000,
+          }),
+          execFileAsync("bd", ["comments", bdId, "--json"], {
+            cwd: labPath,
+            env,
+            timeout: 10000,
+          }),
+        ]);
+        if (showRes.status === "rejected") {
+          throw showRes.reason;
+        }
+        const parsed = JSON.parse(showRes.value.stdout || "[]");
+        const bead = Array.isArray(parsed) ? parsed[0] : parsed;
+        if (bead && typeof bead === "object") {
+          if (commentsRes.status === "fulfilled") {
+            try {
+              const comments = JSON.parse(commentsRes.value.stdout || "[]");
+              if (Array.isArray(comments)) {
+                bead.comments = comments;
+              }
+            } catch {
+              // Ignore comments parse errors
+            }
+          }
+        }
+        return NextResponse.json({ success: true, data: bead });
       }
 
       default:

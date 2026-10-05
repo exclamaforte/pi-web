@@ -43,6 +43,11 @@ export function BeadsMemories({ labPath }: Props) {
   }, [labPath]);
 
   useEffect(() => {
+    setMemories(null);
+    setSearch("");
+  }, [labPath]);
+
+  useEffect(() => {
     loadMemories(search);
   }, [loadMemories, search]);
 

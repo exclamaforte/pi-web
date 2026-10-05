@@ -60,6 +60,10 @@ export function BeadsEvents({ labPath }: Props) {
   }, [labPath]);
 
   useEffect(() => {
+    setData(null);
+  }, [labPath]);
+
+  useEffect(() => {
     loadEvents();
   }, [loadEvents]);
 

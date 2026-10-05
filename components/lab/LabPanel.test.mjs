@@ -33,3 +33,12 @@ test("LabPanel includes database overview stats summary banner", () => {
   assert.match(source, /status\.beads\.blockedCount/);
   assert.match(source, /status\.beads\.totalCount/);
 });
+
+test("LabPanel renders a prominent loading screen for sections when switching labs", () => {
+  assert.match(source, /handleSelectLab/);
+  assert.match(source, /activePathRef/);
+  assert.match(source, /Loading \{selectedLabName\}…/);
+  assert.match(source, /Populating workers, beads dependency graph, experiments, and GPU queue status…/);
+  assert.match(source, /animation:\s*"spin 1s linear infinite"/);
+});
+

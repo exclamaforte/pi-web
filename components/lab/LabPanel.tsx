@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import type { LabSummary, LabFullStatus, BeadItem, GpuJob, ExperimentSummary } from "@/lib/lab-service";
 import { BeadsGraph } from "./BeadsGraph";
 import { BeadsTimeline } from "./BeadsTimeline";
@@ -74,23 +74,41 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
     }
   }, [currentCwd, selectedLabPath]);
 
+  const activePathRef = useRef<string | null>(null);
+
   // Load status for selected lab
   const loadStatus = useCallback(async (path: string, silent = false) => {
+    activePathRef.current = path;
     if (!silent) setLoading(true);
     setRefreshing(true);
     try {
       const res = await fetch(`/api/lab/status?path=${encodeURIComponent(path)}`);
       const json = await res.json();
-      if (json.success) {
+      if (activePathRef.current === path && json.success) {
         setStatus(json.data);
       }
     } catch (e) {
       console.error("Failed to load lab status", e);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (activePathRef.current === path) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
+
+  const handleSelectLab = useCallback((newPath: string) => {
+    if (newPath === selectedLabPath) return;
+    setStatus(null);
+    setLoading(true);
+    setSelectedBead(null);
+    setViewGpuJob(null);
+    setViewExperiment(null);
+    setSelectedLabPath(newPath);
+  }, [selectedLabPath]);
+
+  const selectedLab = useMemo(() => labs.find((l) => l.path === selectedLabPath), [labs, selectedLabPath]);
+  const selectedLabName = selectedLab?.name || (selectedLabPath ? selectedLabPath.split("/").filter(Boolean).pop() : "Lab");
 
   useEffect(() => {
     loadLabs();
@@ -98,6 +116,8 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
 
   useEffect(() => {
     if (selectedLabPath) {
+      setStatus(null);
+      setLoading(true);
       loadStatus(selectedLabPath);
       // Auto-poll status every 10 seconds while panel is open
       const interval = setInterval(() => {
@@ -106,6 +126,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
       return () => clearInterval(interval);
     }
   }, [selectedLabPath, loadStatus]);
+
 
   // Handle Steer action
   const handleSteerSubmit = async () => {
@@ -417,7 +438,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
           {/* Lab Selector Dropdown */}
           <select
             value={selectedLabPath || ""}
-            onChange={(e) => setSelectedLabPath(e.target.value)}
+            onChange={(e) => handleSelectLab(e.target.value)}
             style={{
               fontWeight: 600,
               fontSize: isMobile ? 14 : 16,
@@ -437,8 +458,36 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
             ))}
           </select>
 
-          {/* Daemon Status Badge */}
-          {status && (
+          {/* Daemon Status Badge / Lab Switch Loading Indicator */}
+          {loading && !status ? (
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "3px 8px",
+                borderRadius: 12,
+                fontSize: 12,
+                fontWeight: 500,
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                color: "var(--text-muted)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <div
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  border: "2px solid var(--border)",
+                  borderTopColor: "var(--accent)",
+                  animation: "spin 1s linear infinite",
+                }}
+              />
+              <span>Switching lab…</span>
+            </div>
+          ) : status ? (
             <div
               style={{
                 display: "inline-flex",
@@ -464,7 +513,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
               />
               <span>{status.daemon.alive ? `labd (pid ${status.daemon.pid})` : "labd down"}</span>
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Header Action Buttons */}
@@ -645,12 +694,111 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
       {/* Main Tab Content */}
       <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? 12 : 20 }}>
         {loading && !status ? (
-          <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
-            Loading lab status...
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: 340,
+              padding: isMobile ? "40px 16px" : "60px 24px",
+              background: "var(--bg-panel)",
+              border: "1px solid var(--border)",
+              borderRadius: 12,
+              textAlign: "center",
+              gap: 16,
+              margin: "20px auto",
+              maxWidth: 640,
+            }}
+          >
+            <div style={{ position: "relative", width: 56, height: 56 }}>
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  borderRadius: "50%",
+                  border: "3px solid var(--border)",
+                  borderTopColor: "var(--accent)",
+                  animation: "spin 0.9s cubic-bezier(0.5, 0.1, 0.4, 0.9) infinite",
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 24,
+                }}
+              >
+                🧪
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)" }}>
+                Loading {selectedLabName}…
+              </div>
+              {selectedLabPath && (
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontFamily: "var(--font-mono)",
+                    color: "var(--text-muted)",
+                    background: "var(--bg)",
+                    padding: "3px 8px",
+                    borderRadius: 4,
+                    border: "1px solid var(--border)",
+                    wordBreak: "break-all",
+                    maxWidth: "100%",
+                  }}
+                >
+                  {selectedLabPath}
+                </div>
+              )}
+            </div>
+
+            <div style={{ fontSize: 13, color: "var(--text-muted)", maxWidth: 380, lineHeight: 1.5 }}>
+              Populating workers, beads dependency graph, experiments, and GPU queue status…
+            </div>
           </div>
         ) : !status ? (
-          <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
-            No status available for this lab.
+          <div
+            style={{
+              padding: 40,
+              textAlign: "center",
+              color: "var(--text-muted)",
+              background: "var(--bg-panel)",
+              border: "1px solid var(--border)",
+              borderRadius: 12,
+              maxWidth: 500,
+              margin: "40px auto",
+            }}
+          >
+            <div style={{ fontSize: 28, marginBottom: 10 }}>⚠️</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>
+              No status available for this lab.
+            </div>
+            {selectedLabPath && (
+              <div style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--text-muted)", marginBottom: 12 }}>
+                {selectedLabPath}
+              </div>
+            )}
+            <button
+              onClick={() => selectedLabPath && loadStatus(selectedLabPath)}
+              style={{
+                padding: "6px 14px",
+                borderRadius: 6,
+                border: "1px solid var(--border)",
+                background: "var(--bg)",
+                color: "var(--text)",
+                cursor: "pointer",
+                fontSize: 12,
+              }}
+            >
+              🔄 Retry
+            </button>
           </div>
         ) : (
           <>

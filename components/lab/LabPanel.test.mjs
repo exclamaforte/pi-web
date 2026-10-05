@@ -42,3 +42,9 @@ test("LabPanel renders a prominent loading screen for sections when switching la
   assert.match(source, /animation:\s*"spin 1s linear infinite"/);
 });
 
+test("LabPanel includes All-Labs Summary tab and embeds LabsSummaryView", () => {
+  assert.match(source, /key:\s*"overview",\s*label:\s*"📊 Summary"/);
+  assert.match(source, /<LabsSummaryView/);
+});
+
+

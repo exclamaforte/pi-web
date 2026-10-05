@@ -6,6 +6,7 @@ import { BeadsGraph } from "./BeadsGraph";
 import { BeadsTimeline } from "./BeadsTimeline";
 import { BeadsMemories } from "./BeadsMemories";
 import { BeadsEvents } from "./BeadsEvents";
+import { LabsSummaryView } from "./LabsSummaryView";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 interface Props {
@@ -14,7 +15,7 @@ interface Props {
   onOpenSession?: (cwd: string, sessionId: string) => void;
 }
 
-type TabKey = "workers" | "beads" | "gpu" | "experiments" | "logs";
+type TabKey = "overview" | "workers" | "beads" | "gpu" | "experiments" | "logs";
 type BeadsFilter =
   | "ready"
   | "inProgress"
@@ -644,6 +645,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
         }}
       >
         {[
+          { key: "overview", label: "📊 Summary", count: labs.length ? `${labs.filter((l) => l.daemonAlive).length}/${labs.length}` : undefined },
           { key: "workers", label: "👥 Workers", count: status ? Object.keys(status.workers).length : undefined },
           { key: "beads", label: "📋 Beads", count: status ? (status.beads.readyCount + status.beads.needsReviewCount + status.beads.needsReproduceCount) : undefined },
           { key: "gpu", label: "⚡ GPU Queue", count: status?.gpuQueue?.running?.length ? `${status.gpuQueue.running.length} run` : undefined },
@@ -693,7 +695,15 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
 
       {/* Main Tab Content */}
       <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? 12 : 20 }}>
-        {loading && !status ? (
+        {activeTab === "overview" ? (
+          <LabsSummaryView
+            selectedLabPath={selectedLabPath}
+            onSelectLab={(path, targetTab = "workers") => {
+              handleSelectLab(path);
+              setActiveTab(targetTab);
+            }}
+          />
+        ) : loading && !status ? (
           <div
             style={{
               display: "flex",

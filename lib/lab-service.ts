@@ -98,6 +98,37 @@ export interface LabSummary {
   activeWorkersCount: number;
 }
 
+export type WorkerBubbleState = "working" | "parked" | "idle" | "held" | "dead";
+
+export interface LabWorkerBubble {
+  role: string;
+  state: WorkerBubbleState;
+  alive: boolean;
+  busy: boolean;
+  parked?: boolean;
+  held?: boolean;
+  model?: string;
+  sessionId?: string;
+}
+
+export interface LabOverviewItem {
+  id: string;
+  name: string;
+  path: string;
+  daemonAlive: boolean;
+  pid?: number;
+  gpuActive?: boolean;
+  workers: LabWorkerBubble[];
+  counts: {
+    working: number;
+    parked: number;
+    idle: number;
+    held: number;
+    dead: number;
+    total: number;
+  };
+}
+
 export interface BeadMemory {
   key: string;
   insight: string;
@@ -323,6 +354,117 @@ export function discoverLabs(additionalPaths: string[] = []): LabSummary[] {
     return a.name.localeCompare(b.name);
   });
 }
+
+/** Fetch an overview of all discovered labs with their worker bubble statuses */
+export async function getAllLabsOverview(additionalPaths: string[] = []): Promise<LabOverviewItem[]> {
+  const labs = discoverLabs(additionalPaths);
+
+  const items = await Promise.all(
+    labs.map(async (lab): Promise<LabOverviewItem> => {
+      const { alive, pid } = isDaemonAlive(lab.path);
+      const configPath = join(lab.path, "lab.config.json");
+      let roleNames = DEFAULT_ROLES;
+      let rolesConfig: Record<string, any> = {};
+
+      if (existsSync(configPath)) {
+        try {
+          const cfg = JSON.parse(readFileSync(configPath, "utf8"));
+          if (cfg.roles && typeof cfg.roles === "object") {
+            roleNames = Object.keys(cfg.roles);
+            rolesConfig = cfg.roles;
+          }
+        } catch {
+          // ignore config parse errors
+        }
+      }
+
+      let gpuActive = false;
+      const workerMap: Record<string, LabWorkerBubble> = {};
+      for (const r of roleNames) {
+        workerMap[r] = {
+          role: r,
+          state: alive ? "idle" : "dead",
+          alive: false,
+          busy: false,
+          parked: false,
+          held: false,
+          model: rolesConfig[r]?.model,
+          sessionId: rolesConfig[r]?.sessionId || `lab-${r}`,
+        };
+      }
+
+      if (alive) {
+        try {
+          const ipcRes = await sendLabdIpc(lab.path, { cmd: "status" }, 1500);
+          if (ipcRes?.ok) {
+            gpuActive = Boolean(ipcRes.gpu_active);
+            if (ipcRes.workers && typeof ipcRes.workers === "object") {
+              for (const [r, w] of Object.entries<any>(ipcRes.workers)) {
+                const isAlive = w.alive ?? false;
+                const isBusy = w.busy ?? false;
+                const isHeld = w.held ?? false;
+                const isParked = w.parked ?? false;
+
+                let state: WorkerBubbleState = "idle";
+                if (!isAlive) state = "dead";
+                else if (isHeld) state = "held";
+                else if (isParked) state = "parked";
+                else if (isBusy) state = "working";
+                else state = "idle";
+
+                workerMap[r] = {
+                  role: r,
+                  state,
+                  alive: isAlive,
+                  busy: isBusy,
+                  parked: isParked,
+                  held: isHeld,
+                  model: w.model || rolesConfig[r]?.model,
+                  sessionId: `lab-${r}`,
+                };
+              }
+            }
+          }
+        } catch {
+          // IPC failure leaves workers with safe defaults
+        }
+      }
+
+      const workers = Object.values(workerMap);
+      const counts = {
+        working: workers.filter((w) => w.state === "working").length,
+        parked: workers.filter((w) => w.state === "parked").length,
+        idle: workers.filter((w) => w.state === "idle").length,
+        held: workers.filter((w) => w.state === "held").length,
+        dead: workers.filter((w) => w.state === "dead").length,
+        total: workers.length,
+      };
+
+      return {
+        id: lab.id,
+        name: lab.name,
+        path: lab.path,
+        daemonAlive: alive,
+        pid,
+        gpuActive,
+        workers,
+        counts,
+      };
+    })
+  );
+
+  return items.sort((a, b) => {
+    // Active labs first
+    if (a.daemonAlive && !b.daemonAlive) return -1;
+    if (!a.daemonAlive && b.daemonAlive) return 1;
+    // Then labs with working/parked workers first
+    const aWorking = a.counts.working * 2 + a.counts.parked;
+    const bWorking = b.counts.working * 2 + b.counts.parked;
+    if (bWorking !== aWorking) return bWorking - aWorking;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 
 /** Read beads data using bd command line */
 export async function getBeadsData(labPath: string): Promise<{

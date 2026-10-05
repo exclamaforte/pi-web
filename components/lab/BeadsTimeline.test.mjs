@@ -37,3 +37,8 @@ test("timeline graph highlights incoming and outgoing edges and selected node bo
   assert.match(source, /Outgoing Dependents/);
 });
 
+test("uses GraphScrollContainer to place horizontal scrollbar at the top", () => {
+  assert.match(source, /<GraphScrollContainer contentWidth=\{layout\.width\}>/);
+});
+
+

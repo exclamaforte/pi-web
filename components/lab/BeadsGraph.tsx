@@ -18,6 +18,7 @@ import {
   getTimelineGraphState,
 } from "./beads-timeline";
 import { BeadDetailPanel } from "./BeadDetailPanel";
+import { GraphScrollContainer } from "./GraphScrollContainer";
 
 interface Props {
   labPath: string;
@@ -450,7 +451,7 @@ export function BeadsGraph({ labPath }: Props) {
           </div>
         )}
         {layout && layout.nodes.length > 0 && (
-          <div style={{ overflow: "auto", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8 }}>
+          <GraphScrollContainer contentWidth={layout.width}>
             <svg width={layout.width} height={layout.height} role="img" aria-label="Beads dependency graph">
               <defs>
                 <marker id="bead-edge-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
@@ -653,7 +654,7 @@ export function BeadsGraph({ labPath }: Props) {
                 );
               })}
             </svg>
-          </div>
+          </GraphScrollContainer>
         )}
       </div>
       <BeadDetailPanel bead={detail.bead} loading={detail.loading} error={detail.error} />

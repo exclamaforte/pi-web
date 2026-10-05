@@ -43,3 +43,8 @@ test("legend includes status filter checkboxes to toggle graph visibility", () =
   assert.match(source, /toggleStatus/);
 });
 
+test("uses GraphScrollContainer to place horizontal scrollbar at the top", () => {
+  assert.match(source, /<GraphScrollContainer contentWidth=\{layout\.width\}>/);
+});
+
+

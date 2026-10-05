@@ -20,6 +20,7 @@ import {
   timelineDateLabel,
 } from "./beads-timeline";
 import { BeadDetailPanel } from "./BeadDetailPanel";
+import { GraphScrollContainer } from "./GraphScrollContainer";
 
 interface Props {
   labPath: string;
@@ -379,7 +380,7 @@ export function BeadsTimeline({ labPath }: Props) {
 
         {/* Live Dynamic Dependency Graph reacting to each tick */}
         {layout && layout.nodes.length > 0 && (
-          <div style={{ overflow: "auto", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 4 }}>
+          <GraphScrollContainer contentWidth={layout.width}>
             <svg width={layout.width} height={layout.height} role="img" aria-label="Beads dependency graph">
               <defs>
                 <marker id="timeline-edge-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
@@ -581,7 +582,7 @@ export function BeadsTimeline({ labPath }: Props) {
                 );
               })}
             </svg>
-          </div>
+          </GraphScrollContainer>
         )}
       </div>
       <BeadDetailPanel bead={detail.bead} loading={detail.loading} error={detail.error} />

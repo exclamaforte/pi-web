@@ -17,6 +17,7 @@ export interface LabWorkerStatus {
   pending: number;
   held: boolean;
   parked?: boolean;
+  parkedOn?: string[];
   restarts: number;
   model?: string;
   prompt?: string;
@@ -896,6 +897,55 @@ export function getRecentExperiments(labPath: string): ExperimentSummary[] {
   }
 }
 
+export interface WorkerTimelineSample {
+  ts: number;
+  workers: Record<string, {
+    alive: boolean;
+    connected: boolean;
+    busy: boolean;
+    held: boolean;
+    parked: boolean;
+    parkedOn: string[];
+    pending: number;
+    restarts: number;
+  }>;
+}
+
+/** Read worker status timeline samples (written each labd tick) */
+export function getWorkerTimeline(labPath: string, maxSamples = 1500): WorkerTimelineSample[] {
+  const timelineFile = join(labPath, ".lab", "worker-timeline.jsonl");
+  if (!existsSync(timelineFile)) return [];
+  try {
+    const lines = readFileSync(timelineFile, "utf8").split("\n").filter((l) => l.trim());
+    const out: WorkerTimelineSample[] = [];
+    for (const line of lines.slice(-maxSamples)) {
+      try {
+        const d = JSON.parse(line);
+        if (typeof d.ts !== "number" || typeof d.workers !== "object" || !d.workers) continue;
+        const workers: WorkerTimelineSample["workers"] = {};
+        for (const [role, w] of Object.entries<any>(d.workers)) {
+          workers[role] = {
+            alive: !!w.alive,
+            connected: !!w.connected,
+            busy: !!w.busy,
+            held: !!w.held,
+            parked: !!w.parked,
+            parkedOn: Array.isArray(w.parked_on) ? w.parked_on.map(String) : [],
+            pending: Number(w.pending) || 0,
+            restarts: Number(w.restarts) || 0,
+          };
+        }
+        out.push({ ts: d.ts, workers });
+      } catch {
+        // skip malformed lines
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /** Read daemon log tail */
 export function getDaemonLogTail(labPath: string, maxLines = 100): string[] {
   const logFile = join(labPath, ".lab", "labd.log");
@@ -1051,6 +1101,7 @@ export async function getFullLabStatus(labPath: string): Promise<LabFullStatus> 
               pending: w.pending ?? 0,
               held: w.held ?? false,
               parked: w.parked ?? false,
+              parkedOn: Array.isArray(w.parked_on) ? w.parked_on.map(String) : undefined,
               restarts: w.restarts ?? 0,
               model: w.model,
             };
@@ -1061,6 +1112,7 @@ export async function getFullLabStatus(labPath: string): Promise<LabFullStatus> 
             workers[r].pending = w.pending ?? 0;
             workers[r].held = w.held ?? false;
             workers[r].parked = w.parked ?? false;
+            workers[r].parkedOn = Array.isArray(w.parked_on) ? w.parked_on.map(String) : undefined;
             workers[r].restarts = w.restarts ?? 0;
             if (w.model) workers[r].model = w.model;
           }
@@ -1350,6 +1402,9 @@ export async function commentBead(
     return { ok: false, message: err instanceof Error ? err.message : String(err) };
   }
 }
+
+/** Session ids owned by lab workers: `lab-<role>`, reused in every lab dir. */
+export const LAB_SESSION_ID_PATTERN = /^lab-([A-Za-z0-9_-]+)$/;
 
 /** Check if a session belongs to a lab worker */
 export function isLabSession(

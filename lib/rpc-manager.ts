@@ -1831,6 +1831,35 @@ export function getRpcSession(sessionId: string, cwd?: string): AgentSessionWrap
 export function getRpcSessionByFile(sessionFile: string): AgentSessionWrapper | undefined {
   return findRegistryEntryByFile(sessionFile);
 }
+/**
+ * Shut down every live wrapper attached to one session file.
+ *
+ * Wrappers are keyed by (session id, cwd), so a stale wrapper can survive
+ * under a different key and keep hijacking a transcript owned by someone
+ * else (a lab worker's file opened once from pi-web keeps answering prompts
+ * with the web's model instead of the worker's). Collect-then-shut-down so a
+ * wrapper whose destroy does not unregister cannot trap the loop.
+ */
+export async function shutdownWrappersForFile(sessionFile: string): Promise<number> {
+  const targets = new Set<AgentSessionWrapper>();
+  for (const wrapper of getRegistry().values()) {
+    if (typeof wrapper.isAlive !== "function" || !wrapper.isAlive() || !wrapper.sessionFile) continue;
+    try {
+      if (resolve(wrapper.sessionFile) === resolve(sessionFile)) targets.add(wrapper);
+    } catch {
+      if (wrapper.sessionFile === sessionFile) targets.add(wrapper);
+    }
+  }
+  for (const wrapper of targets) {
+    try {
+      await wrapper.shutdown();
+    } catch {
+      // Already gone; the registry drops it on destroy, and dead wrappers
+      // never match lookups anyway.
+    }
+  }
+  return targets.size;
+}
 
 export interface SetRpcSessionToolsResult {
   session: AgentSessionWrapper;

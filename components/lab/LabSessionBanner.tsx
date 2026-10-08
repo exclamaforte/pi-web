@@ -58,6 +58,7 @@ export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) 
           busy: json.state.isPromptRunning || json.state.isStreaming,
           pending: json.state.pending || 0,
           held: json.state.held || false,
+          parkedOn: Array.isArray(json.state.parkedOn) ? json.state.parkedOn.map(String) : undefined,
           parked: json.state.parked || false,
           restarts: 0,
           model: json.state.model?.id,
@@ -218,6 +219,11 @@ export function LabSessionBanner({ sessionId, cwd, onOpenLabDashboard }: Props) 
           {workerStatus.model && (
             <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
               model: {workerStatus.model}
+            </span>
+          )}
+          {workerStatus.parked && workerStatus.parkedOn && workerStatus.parkedOn.length > 0 && (
+            <span style={{ color: "#a855f7", fontSize: 11 }} title={workerStatus.parkedOn.join("\n")}>
+              on {workerStatus.parkedOn.slice(0, 2).join("; ")}
             </span>
           )}
         </div>

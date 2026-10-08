@@ -629,6 +629,26 @@ export async function resolveSessionPath(sessionId: string, cwd?: string): Promi
   return null;
 }
 
+export function getLastAssistantText(entries: SessionEntry[], leafId?: string | null): string {
+  const branch = leafId === null ? [] : sliceActiveBranch(entries, leafId ?? null, entries.length);
+  for (let i = branch.length - 1; i >= 0; i--) {
+    const message = (branch[i] as { message?: { role?: string; content?: unknown } }).message;
+    if (!message || message.role !== "assistant") continue;
+    const content = message.content;
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      return content
+        .filter((c): c is { type: "text"; text: string } =>
+          typeof c === "object" && c !== null &&
+          (c as { type?: string }).type === "text" &&
+          typeof (c as { text?: unknown }).text === "string")
+        .map((c) => c.text)
+        .join("");
+    }
+  }
+  return "";
+}
+
 export async function resolveSessionIdByPath(filePath: string): Promise<string | undefined> {
   const pathKey = sessionPathKey(filePath);
   const cached = getPathToIdCache().get(pathKey);
@@ -710,7 +730,7 @@ function isSameModel(a: SessionContext["model"], b: SessionContext["model"]): bo
   return false;
 }
 
-function getSessionSettings(entries: SessionEntry[], leafId?: string | null): Pick<SessionContext, "thinkingLevel" | "model"> {
+export function getSessionSettings(entries: SessionEntry[], leafId?: string | null): Pick<SessionContext, "thinkingLevel" | "model"> {
   if (leafId === null) return { thinkingLevel: "off", model: null };
   const branch = sliceActiveBranch(entries, leafId ?? null, entries.length);
   let thinkingLevel: string | undefined;

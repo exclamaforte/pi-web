@@ -7,6 +7,7 @@ import { BeadsTimeline } from "./BeadsTimeline";
 import { BeadsMemories } from "./BeadsMemories";
 import { BeadsEvents } from "./BeadsEvents";
 import { LabsSummaryView } from "./LabsSummaryView";
+import { WorkerTimeline } from "./WorkerTimeline";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 interface Props {
@@ -15,7 +16,7 @@ interface Props {
   onOpenSession?: (cwd: string, sessionId: string) => void;
 }
 
-type TabKey = "overview" | "workers" | "beads" | "gpu" | "experiments" | "logs";
+type TabKey = "overview" | "workers" | "timeline" | "beads" | "gpu" | "experiments" | "logs";
 type BeadsFilter =
   | "ready"
   | "inProgress"
@@ -650,6 +651,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
           { key: "beads", label: "📋 Beads", count: status ? (status.beads.readyCount + status.beads.needsReviewCount + status.beads.needsReproduceCount) : undefined },
           { key: "gpu", label: "⚡ GPU Queue", count: status?.gpuQueue?.running?.length ? `${status.gpuQueue.running.length} run` : undefined },
           { key: "experiments", label: "🔬 Experiments", count: status?.experiments?.length },
+          { key: "timeline", label: "⏳ Timeline" },
           { key: "logs", label: "📜 Logs & Inboxes" },
         ].map((tab) => {
           const isActive = activeTab === tab.key;
@@ -909,7 +911,7 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
                         <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", flexWrap: "wrap", gap: 12 }}>
                           {w.parked && (
                             <div style={{ color: "#a855f7", fontWeight: 600 }}>
-                              ⏸ Parked: idle waiting for background/GPU job completion
+                              ⏸ Parked{w.parkedOn && w.parkedOn.length > 0 ? ` on ${w.parkedOn.join("; ")}` : ": idle waiting for background/GPU job completion"}
                             </div>
                           )}
                           {w.model && (
@@ -1499,6 +1501,10 @@ export function LabPanel({ currentCwd, onClose, onOpenSession }: Props) {
             )}
 
             {/* LOGS & INBOXES TAB */}
+            {activeTab === "timeline" && (
+              <WorkerTimeline labPath={selectedLabPath} />
+            )}
+
             {activeTab === "logs" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 {/* Daemon Log Tail */}
